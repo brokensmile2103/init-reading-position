@@ -1,0 +1,19 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: Init Reading Position 1.0\n"
+"Language: vi\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+msgid "Init Reading Position"
+msgstr "Init Reading Position"
+
+msgid "Remembers where readers left off in a post and automatically scrolls back to that spot when they return. Lightweight, localStorage-based."
+msgstr "Ghi nhớ vị trí đọc trong bài viết và tự động cuộn lại đúng chỗ khi người đọc quay lại. Nhẹ, dùng localStorage."
+
+msgid "Init Reading Position Settings"
+msgstr "Cài đặt Init Reading Position"
+
+msgid "Enable for post types:"
+msgstr "Bật cho các loại nội dung:"
