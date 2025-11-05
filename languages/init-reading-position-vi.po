@@ -17,3 +17,9 @@ msgstr "Cài đặt Init Reading Position"
 
 msgid "Enable for post types:"
 msgstr "Bật cho các loại nội dung:"
+
+msgid "Content area selector"
+msgstr "Selector vùng nội dung"
+
+msgid "Optional. Enter a CSS selector that defines where reading progress is tracked."
+msgstr "Tùy chọn. Nhập CSS selector xác định vùng cần theo dõi vị trí đọc."

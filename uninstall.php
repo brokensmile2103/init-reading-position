@@ -10,5 +10,8 @@ if ( ! defined( 'WP_UNINSTALL_PLUGIN' ) ) {
 	exit;
 }
 
-// Option names used by the plugin:
+// === Delete plugin options ===
 delete_option( 'init_plugin_suite_reading_position_post_types' );
+delete_option( 'init_plugin_suite_reading_position_selector' );
+
+// Done.

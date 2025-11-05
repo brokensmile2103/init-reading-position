@@ -6,8 +6,20 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 
-msgid "Reading Position Settings"
+msgid "Init Reading Position"
+msgstr ""
+
+msgid "Remembers where readers left off in a post and automatically scrolls back to that spot when they return. Lightweight, localStorage-based."
+msgstr ""
+
+msgid "Init Reading Position Settings"
 msgstr ""
 
 msgid "Enable for post types:"
+msgstr ""
+
+msgid "Content area selector"
+msgstr ""
+
+msgid "Optional. Enter a CSS selector that defines where reading progress is tracked."
 msgstr ""

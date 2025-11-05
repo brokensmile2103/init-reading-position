@@ -23,6 +23,17 @@ add_action( 'admin_init', function () {
             'default'           => [ 'post' ],
         ]
     );
+
+    // NEW: Register selector setting
+    register_setting(
+        'init_plugin_suite_reading_position_settings_group',
+        'init_plugin_suite_reading_position_selector',
+        [
+            'sanitize_callback' => 'init_plugin_suite_reading_position_sanitize_selector',
+            'type'              => 'string',
+            'default'           => '', // <== mặc định rỗng
+        ]
+    );
 } );
 
 // === Render settings page ===
@@ -32,14 +43,15 @@ function init_plugin_suite_reading_position_render_settings_page() {
     }
 
     $all_post_types = get_post_types( [ 'public' => true ], 'objects' );
-
-    // Bỏ qua attachment (media)
     unset( $all_post_types['attachment'] );
 
-    $enabled = get_option( 'init_plugin_suite_reading_position_post_types' );
+    $enabled  = get_option( 'init_plugin_suite_reading_position_post_types' );
     if ( ! is_array( $enabled ) || empty( $enabled ) ) {
         $enabled = [ 'post' ];
     }
+
+    // NEW: get selector option
+    $selector = get_option( 'init_plugin_suite_reading_position_selector', '' );
     ?>
     <div class="wrap">
         <h1><?php esc_html_e( 'Init Reading Position Settings', 'init-reading-position' ); ?></h1>
@@ -58,6 +70,26 @@ function init_plugin_suite_reading_position_render_settings_page() {
                                 <?php echo esc_html( $type->label ); ?>
                             </label><br>
                         <?php endforeach; ?>
+                    </td>
+                </tr>
+
+                <!-- NEW: Selector input -->
+                <tr>
+                    <th scope="row">
+                        <label for="init_plugin_suite_reading_position_selector">
+                            <?php esc_html_e( 'Content area selector', 'init-reading-position' ); ?>
+                        </label>
+                    </th>
+                    <td>
+                        <input type="text"
+                               id="init_plugin_suite_reading_position_selector"
+                               name="init_plugin_suite_reading_position_selector"
+                               class="regular-text code"
+                               value="<?php echo esc_attr( $selector ); ?>"
+                               placeholder=".entry-content" />
+                        <p class="description">
+                            <?php esc_html_e( 'Optional. Enter a CSS selector that defines where reading progress is tracked.', 'init-reading-position' ); ?>
+                        </p>
                     </td>
                 </tr>
             </table>
@@ -83,4 +115,10 @@ function init_plugin_suite_reading_position_sanitize_post_types( $input ) {
     }
 
     return $output;
+}
+
+// === Sanitize selector input ===
+function init_plugin_suite_reading_position_sanitize_selector( $input ) {
+    $input = wp_strip_all_tags( (string) $input );
+    return trim( $input ); // không ép default, để user tự nhập
 }

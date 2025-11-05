@@ -4,7 +4,7 @@ Tags: scroll, reading, reading progress, usermeta, resume reading
 Requires at least: 5.5
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 1.0.1
+Stable tag: 1.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -23,6 +23,8 @@ Perfect for:
 * Any content where readers often stop and come back later
 
 This plugin is part of the [Init Plugin Suite](https://en.inithtml.com/init-plugin-suite-minimalist-powerful-and-free-wordpress-plugins/) — a collection of minimalist, fast, and developer-focused tools for WordPress.
+
+GitHub repository: [https://github.com/brokensmile2103/init-reading-position](https://github.com/brokensmile2103/init-reading-position)
 
 **Features**
 
@@ -52,17 +54,25 @@ No. It only runs a small JS script on enabled single pages and stores data effic
 
 == Screenshots ==
 
-1. Simple settings page to enable/disable per post type.
+1. Simple settings page — choose post types and optionally enter a CSS selector (e.g. `.entry-content`) to limit where reading progress is tracked.
 
 == Changelog ==
 
+= 1.1 – November 5, 2025 =
+- Added: CSS Selector option — plugin now only tracks progress inside the selected content area (e.g. `.entry-content`)
+- Added: i18n ready strings for new settings field (English + Vietnamese translations included)
+- Improved: Scroll position tracking logic — no longer saves progress when user scrolls outside the selected content area (e.g. comments section)
+- Improved: Cleanup behavior — scroll progress is deleted only when reaching end of the page, never based on selector range
+- No breaking changes — keeps old localStorage keys and user meta structure
+- Updated: Admin settings page UI/UX (placeholder instead of default selector)
+
 = 1.0 – May 20, 2025 =
-* Initial release
-* Saves scroll position using localStorage (guests) and user meta (logged-in users)
-* Auto-scrolls back to last position on load
-* Per-device storage (PC, Mobile, Tablet)
-* Settings page to choose post types
-* Filter `init_plugin_suite_reading_position_delay` to adjust debounce time
+- Initial release
+- Saves scroll position using localStorage (guests) and user meta (logged-in users)
+- Auto-scrolls back to last position on load
+- Per-device storage (PC, Mobile, Tablet)
+- Settings page to choose post types
+- Filter `init_plugin_suite_reading_position_delay` to adjust debounce time
 
 == License ==
 
