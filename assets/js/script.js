@@ -12,9 +12,18 @@ document.addEventListener('DOMContentLoaded', function () {
         'X-WP-Nonce': InitRPData.nonce || ''
     };
 
-    // Optional selector
-    const selector = (InitRPData && typeof InitRPData.selector === 'string') ? InitRPData.selector.trim() : '';
-    const scopeEl = selector ? document.querySelector(selector) : null;
+    // NEW: auto-clear at end of content area (from localized PHP; default ON)
+    const autoClearOnEnd = !!InitRPData.autoClearOnEnd;
+
+    // Multiple selectors support: ".entry-content, .post-content, #main"
+    const selectors = (InitRPData && typeof InitRPData.selector === 'string')
+        ? InitRPData.selector.split(',').map(s => s.trim()).filter(Boolean)
+        : [];
+
+    // Resolve elements once on load; if DOM mutates heavily, you can refresh this list.
+    const scopeElements = selectors.length
+        ? selectors.map(sel => document.querySelector(sel)).filter(el => el && el.isConnected)
+        : [];
 
     let timeout;
     let lastScrollY = window.scrollY || window.pageYOffset;
@@ -26,7 +35,7 @@ document.addEventListener('DOMContentLoaded', function () {
     }
     const device = getDevice();
 
-    // Restore
+    // Restore (window-based, giữ nguyên)
     if (savedPosition > 0) {
         window.scrollTo({ top: savedPosition, behavior: 'smooth' });
     } else {
@@ -39,53 +48,72 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
-    // percent theo selector nếu có; KHÔNG dùng cho nearBottom
-    function computePercent(viewportY, innerH) {
-        if (scopeEl && scopeEl.isConnected) {
-            const rect = scopeEl.getBoundingClientRect();
-            const scopeTop = viewportY + rect.top;
-            const scopeHeight = Math.max(
-                1,
-                scopeEl.scrollHeight ||
-                Math.max(rect.height || 0, scopeEl.clientHeight || 0)
-            );
-            const yRel = Math.max(0, viewportY - scopeTop);
-            const denom = Math.max(1, scopeHeight - innerH);
-            return Math.min(100, Math.max(0, Math.round((yRel / denom) * 100)));
-        } else {
-            const scrollHeight = Math.max(
-                document.body.scrollHeight || 0,
-                document.documentElement.scrollHeight || 0
-            );
-            const denom = Math.max(1, scrollHeight - innerH);
-            return Math.min(100, Math.max(0, Math.round((viewportY / denom) * 100)));
-        }
-    }
-
-    // NEW: chỉ “được phép lưu” khi viewport đang nằm trong vùng selector (nếu có)
-    function inScope(viewportY, innerH) {
-        if (!(scopeEl && scopeEl.isConnected)) return true; // không có selector => hành vi cũ
-        const rect = scopeEl.getBoundingClientRect();
-        const scopeTop = viewportY + rect.top;
-        const scopeHeight = Math.max(
+    // Utils for scoped metrics
+    function getAbsTopBottom(el, viewportY) {
+        const rect = el.getBoundingClientRect();
+        const absTop = viewportY + rect.top;
+        const heightGuess = Math.max(
+            el.scrollHeight || 0,
             rect.height || 0,
-            scopeEl.scrollHeight || 0,
-            scopeEl.clientHeight || 0
+            el.clientHeight || 0
         );
-        const scopeBottom = scopeTop + scopeHeight;
-
-        // Dùng mép TRÊN của viewport để quyết định: 
-        // khi top của viewport đã đi qua đáy scope => coi như ra ngoài, NGỪNG LƯU
-        return (viewportY >= (scopeTop - 1)) && (viewportY < (scopeBottom - 1));
+        const absBottom = absTop + heightGuess;
+        return { absTop, absBottom, heightGuess };
     }
 
-    // nearBottom của TOÀN TRANG (dùng để XOÁ)
+    // Compute percent (giữ nguyên core logic)
+    function computePercent(viewportY, innerH) {
+        if (scopeElements.length) {
+            for (let i = 0; i < scopeElements.length; i++) {
+                const el = scopeElements[i];
+                const m = getAbsTopBottom(el, viewportY);
+                if (viewportY >= (m.absTop - 1) && viewportY < (m.absBottom - 1)) {
+                    const yRel = Math.max(0, viewportY - m.absTop);
+                    const denom = Math.max(1, m.heightGuess - innerH);
+                    return Math.min(100, Math.max(0, Math.round((yRel / denom) * 100)));
+                }
+            }
+        }
+        // Fallback: whole page
+        const scrollHeight = Math.max(
+            document.body.scrollHeight || 0,
+            document.documentElement.scrollHeight || 0
+        );
+        const denom = Math.max(1, scrollHeight - innerH);
+        return Math.min(100, Math.max(0, Math.round((viewportY / denom) * 100)));
+    }
+
+    // Save allowed?
+    function inScope(viewportY) {
+        if (!scopeElements.length) return true;
+        for (let i = 0; i < scopeElements.length; i++) {
+            const m = getAbsTopBottom(scopeElements[i], viewportY);
+            if (viewportY >= (m.absTop - 1) && viewportY < (m.absBottom - 1)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Near bottom of the PAGE (giữ logic cũ)
     function isNearBottomPage(viewportY, innerH) {
         const scrollHeight = Math.max(
             document.body.scrollHeight || 0,
             document.documentElement.scrollHeight || 0
         );
         return (innerH + viewportY) >= (scrollHeight - 100);
+    }
+
+    // NEW: Near end of ANY scoped element (nếu có selector và bật autoClearOnEnd)
+    function isNearEndOfAnyScope(viewportY, innerH) {
+        if (!scopeElements.length) return false;
+        for (let i = 0; i < scopeElements.length; i++) {
+            const m = getAbsTopBottom(scopeElements[i], viewportY);
+            if ((innerH + viewportY) >= (m.absBottom - 100)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     window.addEventListener('scroll', () => {
@@ -95,9 +123,12 @@ document.addEventListener('DOMContentLoaded', function () {
             const innerHeight = window.innerHeight || 0;
 
             const percent = computePercent(viewportY, innerHeight);
+
+            // NEW: prefer clearing at end of content area when enabled; else fallback to page bottom
+            const nearEndScope = autoClearOnEnd && isNearEndOfAnyScope(viewportY, innerHeight);
             const nearBottomPage = isNearBottomPage(viewportY, innerHeight);
 
-            if (nearBottomPage) {
+            if (nearEndScope || (!autoClearOnEnd && nearBottomPage)) {
                 if (isLoggedIn) {
                     fetch(restBase, {
                         method: 'POST',
@@ -114,9 +145,8 @@ document.addEventListener('DOMContentLoaded', function () {
                 return;
             }
 
-            // Giữ điều kiện cũ: chỉ lưu khi cuộn xuống
-            // NEW: và CHỈ khi đang ở trong vùng selector (nếu có)
-            if (viewportY > lastScrollY && inScope(viewportY, innerHeight)) {
+            // Only save when scrolling down AND within any scoped element (if provided)
+            if (viewportY > lastScrollY && inScope(viewportY)) {
                 localStorage.setItem(storageKey, String(viewportY));
 
                 if (isLoggedIn) {
@@ -127,8 +157,8 @@ document.addEventListener('DOMContentLoaded', function () {
                         body: JSON.stringify({
                             post_id: postId,
                             device: device,
-                            scroll: viewportY,       // y theo window (giữ nguyên)
-                            percent: percent,        // percent scoped nếu có selector
+                            scroll: viewportY,   // keep window-based Y
+                            percent: percent,    // scoped percent if in scope, else page percent
                             screen_height: innerHeight
                         })
                     });

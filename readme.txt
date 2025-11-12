@@ -4,7 +4,7 @@ Tags: scroll, reading, reading progress, usermeta, resume reading
 Requires at least: 5.5
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 1.1
+Stable tag: 1.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -57,6 +57,14 @@ No. It only runs a small JS script on enabled single pages and stores data effic
 1. Simple settings page — choose post types and optionally enter a CSS selector (e.g. `.entry-content`) to limit where reading progress is tracked.
 
 == Changelog ==
+
+= 1.2 – November 12, 2025 =
+- Added: Support for multiple CSS selectors separated by commas (e.g. `.entry-content, .post-content, #main`)
+- Added: Option “Auto-clear saved position at content end” (enabled by default)
+- Improved: Scroll tracking now activates if the reader is inside *any* of the configured selector areas
+- Improved: Percent calculation prioritizes the selector in scope, falls back to whole page when outside all selectors
+- Behavior: When auto-clear is enabled, progress is cleared at the end of the content area; when disabled, it falls back to clearing at page end
+- Zero breaking changes — existing settings, localStorage keys, and user_meta structure remain compatible
 
 = 1.1 – November 5, 2025 =
 - Added: CSS Selector option — plugin now only tracks progress inside the selected content area (e.g. `.entry-content`)

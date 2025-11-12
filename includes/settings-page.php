@@ -12,7 +12,7 @@ add_action( 'admin_menu', function () {
     );
 } );
 
-// === Register setting ===
+// === Register settings ===
 add_action( 'admin_init', function () {
     register_setting(
         'init_plugin_suite_reading_position_settings_group',
@@ -24,14 +24,25 @@ add_action( 'admin_init', function () {
         ]
     );
 
-    // NEW: Register selector setting
+    // Content area selector
     register_setting(
         'init_plugin_suite_reading_position_settings_group',
         'init_plugin_suite_reading_position_selector',
         [
             'sanitize_callback' => 'init_plugin_suite_reading_position_sanitize_selector',
             'type'              => 'string',
-            'default'           => '', // <== mặc định rỗng
+            'default'           => '',
+        ]
+    );
+
+    // Auto-clear on content end (default ON)
+    register_setting(
+        'init_plugin_suite_reading_position_settings_group',
+        'init_plugin_suite_reading_position_auto_clear_on_end',
+        [
+            'sanitize_callback' => 'init_plugin_suite_reading_position_sanitize_bool',
+            'type'              => 'boolean',
+            'default'           => 1,
         ]
     );
 } );
@@ -45,13 +56,13 @@ function init_plugin_suite_reading_position_render_settings_page() {
     $all_post_types = get_post_types( [ 'public' => true ], 'objects' );
     unset( $all_post_types['attachment'] );
 
-    $enabled  = get_option( 'init_plugin_suite_reading_position_post_types' );
+    $enabled = get_option( 'init_plugin_suite_reading_position_post_types' );
     if ( ! is_array( $enabled ) || empty( $enabled ) ) {
         $enabled = [ 'post' ];
     }
 
-    // NEW: get selector option
-    $selector = get_option( 'init_plugin_suite_reading_position_selector', '' );
+    $selector   = get_option( 'init_plugin_suite_reading_position_selector', '' );
+    $auto_clear = (bool) get_option( 'init_plugin_suite_reading_position_auto_clear_on_end', 1 );
     ?>
     <div class="wrap">
         <h1><?php esc_html_e( 'Init Reading Position Settings', 'init-reading-position' ); ?></h1>
@@ -64,16 +75,15 @@ function init_plugin_suite_reading_position_render_settings_page() {
                         <?php foreach ( $all_post_types as $type ) : ?>
                             <label>
                                 <input type="checkbox"
-                                    name="init_plugin_suite_reading_position_post_types[]"
-                                    value="<?php echo esc_attr( $type->name ); ?>"
-                                    <?php checked( in_array( $type->name, $enabled, true ) ); ?> />
+                                       name="init_plugin_suite_reading_position_post_types[]"
+                                       value="<?php echo esc_attr( $type->name ); ?>"
+                                       <?php checked( in_array( $type->name, $enabled, true ) ); ?> />
                                 <?php echo esc_html( $type->label ); ?>
                             </label><br>
                         <?php endforeach; ?>
                     </td>
                 </tr>
 
-                <!-- NEW: Selector input -->
                 <tr>
                     <th scope="row">
                         <label for="init_plugin_suite_reading_position_selector">
@@ -92,6 +102,24 @@ function init_plugin_suite_reading_position_render_settings_page() {
                         </p>
                     </td>
                 </tr>
+
+                <tr>
+                    <th scope="row">
+                        <label for="init_plugin_suite_reading_position_auto_clear_on_end">
+                            <?php esc_html_e( 'Auto-clear saved position at content end', 'init-reading-position' ); ?>
+                        </label>
+                    </th>
+                    <td>
+                        <label>
+                            <input type="checkbox"
+                                   id="init_plugin_suite_reading_position_auto_clear_on_end"
+                                   name="init_plugin_suite_reading_position_auto_clear_on_end"
+                                   value="1"
+                                   <?php checked( $auto_clear ); ?> />
+                            <?php esc_html_e( 'Automatically remove the saved reading position when the reader reaches the end of the content area.', 'init-reading-position' ); ?>
+                        </label>
+                    </td>
+                </tr>
             </table>
             <?php submit_button(); ?>
         </form>
@@ -99,13 +127,13 @@ function init_plugin_suite_reading_position_render_settings_page() {
     <?php
 }
 
-// === Sanitize callback ===
+// === Sanitize callbacks ===
 function init_plugin_suite_reading_position_sanitize_post_types( $input ) {
     $output = [];
 
     if ( is_array( $input ) ) {
         $available_post_types = get_post_types( [ 'public' => true ] );
-        unset( $available_post_types['attachment'] ); // bỏ media luôn
+        unset( $available_post_types['attachment'] );
 
         foreach ( $input as $pt ) {
             if ( in_array( $pt, $available_post_types, true ) ) {
@@ -117,8 +145,11 @@ function init_plugin_suite_reading_position_sanitize_post_types( $input ) {
     return $output;
 }
 
-// === Sanitize selector input ===
 function init_plugin_suite_reading_position_sanitize_selector( $input ) {
     $input = wp_strip_all_tags( (string) $input );
-    return trim( $input ); // không ép default, để user tự nhập
+    return trim( $input );
+}
+
+function init_plugin_suite_reading_position_sanitize_bool( $value ) {
+    return ( ! empty( $value ) ) ? 1 : 0;
 }

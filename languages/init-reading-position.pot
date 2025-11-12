@@ -23,3 +23,9 @@ msgstr ""
 
 msgid "Optional. Enter a CSS selector that defines where reading progress is tracked."
 msgstr ""
+
+msgid "Auto-clear saved position at content end"
+msgstr ""
+
+msgid "Automatically remove the saved reading position when the reader reaches the end of the content area."
+msgstr ""

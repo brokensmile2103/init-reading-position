@@ -23,3 +23,9 @@ msgstr "Selector vùng nội dung"
 
 msgid "Optional. Enter a CSS selector that defines where reading progress is tracked."
 msgstr "Tùy chọn. Nhập CSS selector xác định vùng cần theo dõi vị trí đọc."
+
+msgid "Auto-clear saved position at content end"
+msgstr "Tự động xóa vị trí lưu khi đọc đến cuối nội dung"
+
+msgid "Automatically remove the saved reading position when the reader reaches the end of the content area."
+msgstr "Tự động xóa vị trí đọc đã lưu khi người dùng kéo đến cuối vùng nội dung."

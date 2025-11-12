@@ -13,5 +13,6 @@ if ( ! defined( 'WP_UNINSTALL_PLUGIN' ) ) {
 // === Delete plugin options ===
 delete_option( 'init_plugin_suite_reading_position_post_types' );
 delete_option( 'init_plugin_suite_reading_position_selector' );
+delete_option( 'init_plugin_suite_reading_position_auto_clear_on_end' );
 
 // Done.
