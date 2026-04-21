@@ -27,11 +27,13 @@ document.addEventListener('DOMContentLoaded', function () {
 
     let timeout;
     let lastScrollY = window.scrollY || window.pageYOffset;
+    let lastSent = 0;
+    const SEND_INTERVAL = 5000;
 
     function getDevice() {
-        if (/Mobi|Android/i.test(navigator.userAgent)) return 'Mobile';
-        if (window.innerWidth >= 1024) return 'PC';
-        return 'Tablet';
+        if (/Mobi|Android/i.test(navigator.userAgent)) return 'mobile';
+        if (window.innerWidth >= 1024) return 'pc';
+        return 'tablet';
     }
     const device = getDevice();
 
@@ -139,7 +141,7 @@ document.addEventListener('DOMContentLoaded', function () {
                             device: device,
                             action: 'delete'
                         })
-                    });
+                    }).catch(() => {});
                 }
                 localStorage.removeItem(storageKey);
                 return;
@@ -150,18 +152,24 @@ document.addEventListener('DOMContentLoaded', function () {
                 localStorage.setItem(storageKey, String(viewportY));
 
                 if (isLoggedIn) {
-                    fetch(restBase, {
-                        method: 'POST',
-                        headers: headersJSON,
-                        credentials: 'same-origin',
-                        body: JSON.stringify({
-                            post_id: postId,
-                            device: device,
-                            scroll: viewportY,   // keep window-based Y
-                            percent: percent,    // scoped percent if in scope, else page percent
-                            screen_height: innerHeight
-                        })
-                    });
+                    const now = Date.now();
+
+                    if (now - lastSent > SEND_INTERVAL) {
+                        lastSent = now;
+
+                        fetch(restBase, {
+                            method: 'POST',
+                            headers: headersJSON,
+                            credentials: 'same-origin',
+                            body: JSON.stringify({
+                                post_id: postId,
+                                device: device,
+                                scroll: viewportY,
+                                percent: percent,
+                                screen_height: innerHeight
+                            })
+                        }).catch(() => {});
+                    }
                 }
             }
 

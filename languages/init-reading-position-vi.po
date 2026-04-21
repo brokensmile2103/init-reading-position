@@ -9,6 +9,9 @@ msgstr ""
 msgid "Init Reading Position"
 msgstr "Init Reading Position"
 
+msgid "Settings"
+msgstr "Cài đặt"
+
 msgid "Remembers where readers left off in a post and automatically scrolls back to that spot when they return. Lightweight, localStorage-based."
 msgstr "Ghi nhớ vị trí đọc trong bài viết và tự động cuộn lại đúng chỗ khi người đọc quay lại. Nhẹ, dùng localStorage."
 

@@ -4,7 +4,7 @@ Tags: scroll, reading, reading progress, usermeta, resume reading
 Requires at least: 5.5
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 1.2
+Stable tag: 1.3
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -57,6 +57,18 @@ No. It only runs a small JS script on enabled single pages and stores data effic
 1. Simple settings page — choose post types and optionally enter a CSS selector (e.g. `.entry-content`) to limit where reading progress is tracked.
 
 == Changelog ==
+
+= 1.3 – April 21, 2026 =
+- Added: Switched from user_meta storage to a dedicated custom database table for reading positions
+- Added: Automatic migration from existing user_meta data to the new database structure (runs safely in the background)
+- Added: Optimized database schema with unique keys (user_id, post_id, device) for efficient upsert operations
+- Improved: Faster read/write performance and better scalability for large sites
+- Improved: Reduced API request frequency by adding a throttle layer on top of existing debounce
+- Improved: Device detection now uses normalized lowercase values (`pc`, `mobile`, `tablet`) for full backend consistency
+- Improved: Added fail-safe handling for REST requests to prevent JavaScript errors on network issues
+- Performance: Significantly reduced server load for logged-in users and improved overall responsiveness
+- Backward-compatible: Existing user_meta data is migrated seamlessly, with fallback support during transition
+- No breaking changes — REST API, localStorage keys, and frontend behavior remain fully compatible
 
 = 1.2 – November 12, 2025 =
 - Added: Support for multiple CSS selectors separated by commas (e.g. `.entry-content, .post-content, #main`)

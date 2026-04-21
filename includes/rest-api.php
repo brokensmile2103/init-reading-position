@@ -4,7 +4,6 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 /**
  * REST API endpoint cho Init Reading Position
  */
-
 add_action( 'rest_api_init', function () {
     register_rest_route(
         INIT_PLUGIN_SUITE_RP_NAMESPACE,
@@ -29,7 +28,16 @@ add_action( 'rest_api_init', function () {
 } );
 
 /**
- * Handle scroll data saving (POST) and deleting (DELETE)
+ * Handle scroll data saving (POST) and deleting (DELETE).
+ *
+ * Đã refactor: không còn dùng update_user_meta / delete_user_meta.
+ * Mọi thao tác đọc/ghi đi qua custom table thông qua các helper trong db.php:
+ *   - init_plugin_suite_rp_upsert()
+ *   - init_plugin_suite_rp_delete()
+ *   - init_plugin_suite_rp_get()
+ *
+ * Fallback về meta cũ vẫn được xử lý trong init_plugin_suite_rp_get() cho
+ * các user chưa được migrate, đảm bảo backward-compatibility.
  *
  * @param WP_REST_Request $request
  * @return WP_REST_Response|WP_Error
@@ -51,17 +59,9 @@ function init_plugin_suite_reading_position_handle_scroll_request( WP_REST_Reque
     }
     $device = sanitize_key( $device );
 
-    // Meta key chuẩn hóa
-    $meta_key = apply_filters(
-        'init_plugin_suite_reading_position_meta_key',
-        "_init_plugin_suite_reading_position_{$post_id}_{$device}",
-        $post_id,
-        $device
-    );
-
     $method = $request->get_method();
 
-    // ===== DELETE: remove meta =====
+    // ===== DELETE =====
     if ( $method === 'DELETE' || $request->get_param( 'action' ) === 'delete' ) {
         $should_delete = apply_filters(
             'init_plugin_suite_reading_position_should_delete',
@@ -72,45 +72,57 @@ function init_plugin_suite_reading_position_handle_scroll_request( WP_REST_Reque
         );
 
         if ( $should_delete ) {
-            delete_user_meta( $user_id, $meta_key );
-            // xóa thêm key cũ (back-compat)
-            $legacy_key = "_init_rp_{$post_id}_{$device}";
-            if ( $legacy_key !== $meta_key ) {
-                delete_user_meta( $user_id, $legacy_key );
-            }
-            return rest_ensure_response( [ 'deleted' => true ] );
+            $deleted = init_plugin_suite_rp_delete( $user_id, $post_id, $device );
+            return rest_ensure_response( [ 'deleted' => $deleted ] );
         }
+
         return rest_ensure_response( [ 'deleted' => false ] );
     }
 
-    // ===== POST: save/update meta =====
-    $scrollTop     = max( 0, (int) ( $request->get_param( 'scroll' ) ?? 0 ) );
-    $percent       = min( 100, max( 0, (int) ( $request->get_param( 'percent' ) ?? 0 ) ) );
+    // ===== POST: save/update =====
+    $scroll_top    = max( 0, (int) ( $request->get_param( 'scroll' )        ?? 0 ) );
+    $percent       = min( 100, max( 0, (int) ( $request->get_param( 'percent' )       ?? 0 ) ) );
     $screen_height = max( 0, (int) ( $request->get_param( 'screen_height' ) ?? 0 ) );
+    $updated_at    = current_time( 'mysql', true );
 
-    $data = [
-        'scrollTop'    => $scrollTop,
-        'percent'      => $percent,
-        'screenHeight' => $screen_height,
-        'updated'      => current_time( 'mysql', true ),
-        'postId'       => $post_id,
-        'device'       => $device,
-    ];
-
+    // Giữ lại filter để developer bên ngoài có thể can thiệp vào data trước khi lưu
     $data = apply_filters(
         'init_plugin_suite_reading_position_data_to_store',
-        $data,
+        [
+            'scrollTop'    => $scroll_top,
+            'percent'      => $percent,
+            'screenHeight' => $screen_height,
+            'updated'      => $updated_at,
+            'postId'       => $post_id,
+            'device'       => $device,
+        ],
         $post_id,
         $device,
         $user_id
     );
 
-    update_user_meta( $user_id, $meta_key, $data );
+    // Đọc lại các giá trị sau filter (developer có thể đã chỉnh)
+    $scroll_top    = max( 0, (int) ( $data['scrollTop']    ?? $scroll_top ) );
+    $percent       = min( 100, max( 0, (int) ( $data['percent']       ?? $percent ) ) );
+    $screen_height = max( 0, (int) ( $data['screenHeight'] ?? $screen_height ) );
+    $updated_at    = sanitize_text_field( $data['updated'] ?? $updated_at );
+
+    $saved = init_plugin_suite_rp_upsert(
+        $user_id,
+        $post_id,
+        $device,
+        $scroll_top,
+        $percent,
+        $screen_height,
+        $updated_at
+    );
+
+    if ( ! $saved ) {
+        return new WP_Error( 'db_error', __( 'Could not save reading position.', 'init-reading-position' ), [ 'status' => 500 ] );
+    }
 
     return rest_ensure_response( [
-        'success'  => true,
-        // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key
-        'meta_key' => $meta_key,
-        'data'     => $data,
+        'success' => true,
+        'data'    => $data,
     ] );
 }
