@@ -113,7 +113,7 @@ function init_plugin_suite_rp_create_table() {
 // Migration: user_meta → DB
 // ==========================
 
-define( 'INIT_PLUGIN_SUITE_RP_MIGRATION_VERSION', 1 );
+define( 'INIT_PLUGIN_SUITE_RP_MIGRATION_VERSION', 2 );
 
 /**
  * Migrate reading positions từ user_meta sang custom table.
@@ -150,17 +150,17 @@ function init_plugin_suite_rp_maybe_migrate() {
 	];
 
 	// Lấy 200 user đầu tiên còn meta (không dùng OFFSET vì meta bị delete sau khi xử lý)
-	$placeholders = implode( ', ', array_fill( 0, count( $meta_patterns ), '%s' ) );
+	$conditions = implode( ' OR ', array_fill( 0, count( $meta_patterns ), 'meta_key LIKE %s' ) );
 	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
 	$user_ids = $wpdb->get_col(
 		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare
 		$wpdb->prepare(
-			"SELECT DISTINCT user_id FROM {$wpdb->usermeta}
-			 WHERE ( meta_key LIKE {$placeholders} )
-			 ORDER BY user_id ASC
-			 LIMIT 200",
-			...$meta_patterns
-		)
+	        "SELECT DISTINCT user_id FROM {$wpdb->usermeta}
+	         WHERE ( $conditions )
+	         ORDER BY user_id ASC
+	         LIMIT 200",
+	        ...$meta_patterns
+	    )
 		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare
 	);
 
