@@ -4,7 +4,7 @@ Tags: scroll, reading, reading progress, usermeta, resume reading
 Requires at least: 5.5
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 1.3.1
+Stable tag: 1.4.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -57,6 +57,13 @@ No. It only runs a small JS script on enabled single pages and stores data effic
 1. Simple settings page — choose post types and optionally enter a CSS selector (e.g. `.entry-content`) to limit where reading progress is tracked.
 
 == Changelog ==
+
+= 1.4 – April 21, 2026 =
+- Refactored: Migration now runs via a self-scheduling WP-Cron event instead of admin_init
+- Added: Automatic re-scheduling every 30 seconds until migration completes
+- Improved: Removed dependency on admin requests for background processing
+- Improved: Added locking to prevent overlapping migration runs
+- No breaking changes
 
 = 1.3 – April 21, 2026 =
 - Added: Switched from user_meta storage to a dedicated custom database table for reading positions

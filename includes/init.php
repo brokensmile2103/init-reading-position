@@ -13,11 +13,6 @@ add_action( 'admin_init', function () {
 	if ( version_compare( $current_db_version, INIT_PLUGIN_SUITE_RP_VERSION, '<' ) ) {
 		init_plugin_suite_rp_check_table();
 	}
-
-	$done = (int) get_option( 'irp_migration_done', 0 );
-	if ( $done < INIT_PLUGIN_SUITE_RP_MIGRATION_VERSION ) {
-		init_plugin_suite_rp_maybe_migrate();
-	}
 } );
 
 /**
@@ -61,6 +56,10 @@ function init_plugin_suite_rp_check_table() {
 	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter
 	if ( $wpdb->get_var( "SHOW TABLES LIKE '$table'" ) !== $table ) {
 		init_plugin_suite_rp_create_table();
+	}
+
+	if ( ! wp_next_scheduled( 'init_plugin_suite_rp_migration_event' ) ) {
+		wp_schedule_single_event( time() + 30, 'init_plugin_suite_rp_migration_event' );
 	}
 
 	update_option( 'irp_plugin_db_version', INIT_PLUGIN_SUITE_RP_VERSION );
@@ -127,13 +126,9 @@ define( 'INIT_PLUGIN_SUITE_RP_MIGRATION_VERSION', 2 );
  * Chạy theo batch 200 user/lần (idempotent – xóa meta sau khi migrate xong).
  */
 function init_plugin_suite_rp_maybe_migrate() {
-	if ( ! current_user_can( 'administrator' ) ) {
-		return;
-	}
-
 	$done = (int) get_option( 'irp_migration_done', 0 );
 	if ( $done >= INIT_PLUGIN_SUITE_RP_MIGRATION_VERSION ) {
-		return;
+		return false;
 	}
 
 	global $wpdb;
@@ -141,7 +136,7 @@ function init_plugin_suite_rp_maybe_migrate() {
 
 	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter
 	if ( $wpdb->get_var( "SHOW TABLES LIKE '$table'" ) !== $table ) {
-		return;
+		return false;
 	}
 
 	$meta_patterns = [
@@ -166,7 +161,7 @@ function init_plugin_suite_rp_maybe_migrate() {
 
 	if ( empty( $user_ids ) ) {
 		update_option( 'irp_migration_done', INIT_PLUGIN_SUITE_RP_MIGRATION_VERSION, false );
-		return;
+		return false;
 	}
 
 	foreach ( $user_ids as $user_id ) {
@@ -187,7 +182,10 @@ function init_plugin_suite_rp_maybe_migrate() {
 
 	if ( $remaining === 0 ) {
 		update_option( 'irp_migration_done', INIT_PLUGIN_SUITE_RP_MIGRATION_VERSION, false );
+		return false;
 	}
+
+	return true;
 }
 
 /**
@@ -515,12 +513,18 @@ function init_plugin_suite_rp_on_update( $upgrader_object, $options ) {
 		isset( $options['action'], $options['type'] ) &&
 		$options['action'] === 'update' &&
 		$options['type'] === 'plugin' &&
-		isset( $options['plugins'] ) &&
-		is_array( $options['plugins'] )
+		! empty( $options['plugins'] )
 	) {
 		foreach ( $options['plugins'] as $plugin_path ) {
-			if ( strpos( $plugin_path, INIT_PLUGIN_SUITE_RP_SLUG ) !== false ) {
+
+			if ( $plugin_path === plugin_basename( INIT_PLUGIN_SUITE_RP_FILE ) ) {
+
 				init_plugin_suite_rp_check_table();
+
+				// reset + schedule lại luôn cho chắc
+				wp_clear_scheduled_hook( 'init_plugin_suite_rp_migration_event' );
+				wp_schedule_single_event( time() + 30, 'init_plugin_suite_rp_migration_event' );
+
 				break;
 			}
 		}
