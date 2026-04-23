@@ -3,7 +3,7 @@
  * Plugin Name: Init Reading Position
  * Description: Remembers where readers left off in a post and automatically scrolls back to that spot when they return. Lightweight, localStorage-based.
  * Plugin URI: https://inithtml.com/plugin/init-reading-position/
- * Version: 1.5
+ * Version: 1.6
  * Author: Init HTML
  * Author URI: https://inithtml.com/
  * Text Domain: init-reading-position
@@ -18,7 +18,7 @@
 if ( ! defined( 'ABSPATH' ) ) exit;
 
 // === Constants (standardized to INIT_PLUGIN_SUITE_READING_POSITION_*) ===
-define( 'INIT_PLUGIN_SUITE_RP_VERSION', '1.5' );
+define( 'INIT_PLUGIN_SUITE_RP_VERSION', '1.6' );
 define( 'INIT_PLUGIN_SUITE_RP_FILE',    __FILE__ );
 define( 'INIT_PLUGIN_SUITE_RP_PATH',    plugin_dir_path( __FILE__ ) );
 define( 'INIT_PLUGIN_SUITE_RP_URL',     plugin_dir_url( __FILE__ ) );
@@ -48,22 +48,29 @@ add_action( 'wp_enqueue_scripts', function () {
     $user_logged_in = is_user_logged_in();
 
     // Device detection được trust hoàn toàn từ JS (getDevice()).
-    // PHP chỉ cần truyền savedPosition cho logged-in user.
+    // PHP chỉ cần truyền savedPositions cho logged-in user.
     // JS sẽ gửi đúng device string lên REST API khi save/delete.
-    $scroll_position = 0;
+    $saved_positions = [
+        'pc'     => 0,
+        'mobile' => 0,
+        'tablet' => 0,
+    ];
 
     if ( $user_logged_in ) {
+        $user_id = get_current_user_id();
         $post_id = get_the_ID();
 
-        // Thử cả 3 device theo thứ tự ưu tiên để lấy position gần nhất.
-        // JS sẽ tự detect đúng device và ghi đè lên đúng slot khi save.
-        foreach ( [ 'pc', 'mobile', 'tablet' ] as $d ) {
-            $data = init_plugin_suite_reading_position_get( get_current_user_id(), $post_id, $d );
-            if ( is_array( $data ) && ! empty( $data['scrollTop'] ) ) {
-                $scroll_position = (int) $data['scrollTop'];
-                break;
-            }
-        }
+        $data = init_plugin_suite_reading_position_get(
+            $user_id,
+            $post_id,
+            [ 'pc', 'mobile', 'tablet' ]
+        );
+
+        $saved_positions = [
+            'pc'     => ! empty( $data['pc']['scrollTop'] ) ? (int) $data['pc']['scrollTop'] : 0,
+            'mobile' => ! empty( $data['mobile']['scrollTop'] ) ? (int) $data['mobile']['scrollTop'] : 0,
+            'tablet' => ! empty( $data['tablet']['scrollTop'] ) ? (int) $data['tablet']['scrollTop'] : 0,
+        ];
     }
 
     $selector   = (string) get_option( 'init_plugin_suite_reading_position_selector', '' );
@@ -74,7 +81,7 @@ add_action( 'wp_enqueue_scripts', function () {
         'postId'         => get_the_ID(),
         'delay'          => $delay,
         'loggedIn'       => $user_logged_in,
-        'savedPosition'  => $scroll_position,
+        'savedPositions' => $saved_positions,
         'nonce'          => wp_create_nonce( 'wp_rest' ),
         'selector'       => $selector,
         'autoClearOnEnd' => $auto_clear,

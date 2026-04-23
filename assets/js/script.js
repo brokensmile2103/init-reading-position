@@ -4,7 +4,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const postId        = InitRPData.postId;
     const delay         = InitRPData.delay || 1000;
     const isLoggedIn    = !!InitRPData.loggedIn;
-    const savedPosition = InitRPData.savedPosition || 0;
+    const savedPositions= InitRPData.savedPositions || {};
     const storageKey    = 'init_rp_' + postId;
     const restBase      = ((InitRPData.restUrl ? String(InitRPData.restUrl) : '/wp-json/initrepo/v1').replace(/\/$/, '')) + '/scroll';
     const headersJSON   = {
@@ -66,6 +66,7 @@ document.addEventListener('DOMContentLoaded', function () {
         return 'tablet';
     }
     const device = getDevice();
+    const savedPosition = savedPositions[device] || 0;
 
     // Restore scroll position
     if (savedPosition > 0) {

@@ -356,31 +356,83 @@ function init_plugin_suite_reading_position_upsert( $user_id, $post_id, $device,
  * @param string $device
  * @return array|null  Row dạng legacy hoặc null nếu không có.
  */
-function init_plugin_suite_reading_position_get( $user_id, $post_id, $device ) {
+function init_plugin_suite_reading_position_get( $user_id, $post_id, $device = 'pc' ) {
 	$user_id = (int) $user_id;
 	$post_id = (int) $post_id;
-	$device  = sanitize_key( $device );
+
+	global $wpdb;
+	$table = init_plugin_suite_reading_position_table();
+
+	// ==========================
+	// BULK MODE (multi-device)
+	// ==========================
+	if ( is_array( $device ) ) {
+		$devices = array_map( 'sanitize_key', $device );
+
+		if ( empty( $devices ) ) {
+			return [];
+		}
+
+		$cache_key = init_plugin_suite_reading_position_bulk_cache_key( $user_id, $post_id );
+		$group     = init_plugin_suite_reading_position_cache_group();
+
+		$cached = wp_cache_get( $cache_key, $group );
+		if ( false !== $cached ) {
+			return $cached;
+		}
+
+		$placeholders = implode( ',', array_fill( 0, count( $devices ), '%s' ) );
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, PluginCheck.Security.DirectDB.UnescapedDBParameter
+		$rows = $wpdb->get_results(
+			// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+			// phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
+			$wpdb->prepare(
+				"SELECT * FROM {$table} WHERE user_id = %d AND post_id = %d AND device IN ($placeholders)",
+				array_merge( [ $user_id, $post_id ], $devices )
+			),
+			ARRAY_A
+			// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		);
+
+		$result = array_fill_keys( $devices, null );
+
+		if ( $rows ) {
+			foreach ( $rows as $row ) {
+				$d = $row['device'];
+				$result[ $d ] = init_plugin_suite_reading_position_row_to_legacy( $row );
+			}
+		}
+
+		wp_cache_set( $cache_key, $result, $group, init_plugin_suite_reading_position_cache_ttl() );
+
+		return $result;
+	}
+
+	// ==========================
+	// SINGLE MODE
+	// ==========================
+	$device = sanitize_key( $device );
 
 	$cache_key = init_plugin_suite_reading_position_cache_key( $user_id, $post_id, $device );
 	$group     = init_plugin_suite_reading_position_cache_group();
 
 	$cached = wp_cache_get( $cache_key, $group );
 	if ( false !== $cached ) {
-		return $cached ?: null; // lưu '' để biểu thị "không có"
+		return $cached ?: null;
 	}
 
-	global $wpdb;
-	$table = init_plugin_suite_reading_position_table();
-
-	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, PluginCheck.Security.DirectDB.UnescapedDBParameter
 	$row = $wpdb->get_row(
+		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 		$wpdb->prepare(
-			"SELECT * FROM $table WHERE user_id = %d AND post_id = %d AND device = %s LIMIT 1", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+			"SELECT * FROM {$table} WHERE user_id = %d AND post_id = %d AND device = %s LIMIT 1",
 			$user_id,
 			$post_id,
 			$device
 		),
 		ARRAY_A
+		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 	);
 
 	if ( $row ) {
@@ -389,9 +441,8 @@ function init_plugin_suite_reading_position_get( $user_id, $post_id, $device ) {
 		return $data;
 	}
 
-	// Fallback: thử đọc meta cũ (canonical rồi legacy)
 	$data = init_plugin_suite_reading_position_get_meta_fallback( $user_id, $post_id, $device );
-	// Lưu cache dù null để tránh hit DB lại (lưu '' thay cho null)
+
 	wp_cache_set( $cache_key, $data ?? '', $group, init_plugin_suite_reading_position_cache_ttl() );
 	return $data;
 }
@@ -492,14 +543,18 @@ function init_plugin_suite_reading_position_cache_key( $user_id, $post_id, $devi
 	return 'pos_' . (int) $user_id . '_' . (int) $post_id . '_' . sanitize_key( $device );
 }
 
+function init_plugin_suite_reading_position_bulk_cache_key( $user_id, $post_id ) {
+    return 'pos_bulk_' . (int) $user_id . '_' . (int) $post_id . '_pc_mobile_tablet';
+}
+
 /**
  * Xóa cache khi có thay đổi.
  */
 function init_plugin_suite_reading_position_invalidate_cache( $user_id, $post_id, $device ) {
-	wp_cache_delete(
-		init_plugin_suite_reading_position_cache_key( $user_id, $post_id, $device ),
-		init_plugin_suite_reading_position_cache_group()
-	);
+	$group = init_plugin_suite_reading_position_cache_group();
+
+	wp_cache_delete(init_plugin_suite_reading_position_cache_key( $user_id, $post_id, $device ), $group);
+	wp_cache_delete(init_plugin_suite_reading_position_bulk_cache_key( $user_id, $post_id ), $group);
 }
 
 // ==========================

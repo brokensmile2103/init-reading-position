@@ -4,7 +4,7 @@ Tags: scroll, reading, reading progress, resume reading, reading position
 Requires at least: 5.5
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 1.5
+Stable tag: 1.6
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -57,6 +57,16 @@ No. It only runs a small JS script on enabled single pages and stores data effic
 1. Simple settings page — choose post types and optionally enter a CSS selector (e.g. `.entry-content`) to limit where reading progress is tracked.
 
 == Changelog ==
+
+= 1.6 – April 23, 2026 =
+- Improved: Reading position retrieval is now handled via a single bulk query instead of multiple per-device lookups — reduces database queries and improves performance for logged-in users
+- Added: Bulk cache layer for multi-device reading positions with a deterministic cache key (`pc_mobile_tablet`) — ensures consistent cache hits and simplifies invalidation logic
+- Improved: Cache invalidation now clears both single-device and bulk cache entries — prevents stale data when users continue reading across sessions
+- Improved: Data flow refactored to return all device positions (`pc`, `mobile`, `tablet`) in one payload — frontend now selects the correct device slot dynamically
+- Fixed: Inconsistent cache key generation (previous md5-based keys) that could lead to stale or non-invalidated cache entries
+- Fixed: Potential PHP notice when `savedPositions` was undefined for guest users — now always initialized with default values
+- Improved: Internal code cleanup and minor optimizations for better maintainability and consistency
+- No breaking changes — REST API, database schema, localStorage keys, and frontend behavior remain fully compatible
 
 = 1.5 – April 23, 2026 =
 - Improved: Device detection is now handled entirely by JavaScript — PHP no longer performs UA sniffing on the server side, eliminating mismatches between detected device on page load vs. save

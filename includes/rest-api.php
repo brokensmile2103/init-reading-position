@@ -60,8 +60,9 @@ function init_plugin_suite_reading_position_handle_scroll_request( WP_REST_Reque
         return new WP_Error( 'invalid_post', __( 'Invalid post.', 'init-reading-position' ), [ 'status' => 400 ] );
     }
 
-    $device = sanitize_key( (string) $request->get_param( 'device' ) );
-    if ( $device === '' ) {
+    $allowed_devices = [ 'pc', 'mobile', 'tablet' ];
+    $device          = sanitize_key( (string) $request->get_param( 'device' ) );
+    if ( ! in_array( $device, $allowed_devices, true ) ) {
         $device = 'pc';
     }
 
