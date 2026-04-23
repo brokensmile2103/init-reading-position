@@ -5,29 +5,29 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 // Create / upgrade database
 // ==========================
 
-register_activation_hook( INIT_PLUGIN_SUITE_RP_FILE, 'init_plugin_suite_rp_on_activation' );
-add_action( 'wpmu_new_blog', 'init_plugin_suite_rp_on_new_blog', 10, 6 );
+register_activation_hook( INIT_PLUGIN_SUITE_RP_FILE, 'init_plugin_suite_reading_position_on_activation' );
+add_action( 'wpmu_new_blog', 'init_plugin_suite_reading_position_on_new_blog', 10, 6 );
 
 add_action( 'admin_init', function () {
 	$current_db_version = get_option( 'irp_plugin_db_version', '0.0.0' );
 	if ( version_compare( $current_db_version, INIT_PLUGIN_SUITE_RP_VERSION, '<' ) ) {
-		init_plugin_suite_rp_check_table();
+		init_plugin_suite_reading_position_check_table();
 	}
 } );
 
 /**
  * Activation hook – single site hoặc toàn multisite network.
  */
-function init_plugin_suite_rp_on_activation() {
+function init_plugin_suite_reading_position_on_activation() {
 	if ( is_multisite() ) {
 		$sites = get_sites( [ 'number' => 0 ] );
 		foreach ( $sites as $site ) {
 			switch_to_blog( $site->blog_id );
-			init_plugin_suite_rp_create_table();
+			init_plugin_suite_reading_position_create_table();
 			restore_current_blog();
 		}
 	} else {
-		init_plugin_suite_rp_create_table();
+		init_plugin_suite_reading_position_create_table();
 	}
 
 	update_option( 'irp_plugin_db_version', INIT_PLUGIN_SUITE_RP_VERSION );
@@ -36,16 +36,16 @@ function init_plugin_suite_rp_on_activation() {
 /**
  * Tạo bảng cho site mới trong multisite.
  */
-function init_plugin_suite_rp_on_new_blog( $blog_id, $user_id, $domain, $path, $site_id, $meta ) {
+function init_plugin_suite_reading_position_on_new_blog( $blog_id, $user_id, $domain, $path, $site_id, $meta ) {
 	switch_to_blog( $blog_id );
-	init_plugin_suite_rp_create_table();
+	init_plugin_suite_reading_position_create_table();
 	restore_current_blog();
 }
 
 /**
  * Kiểm tra & tạo bảng nếu chưa tồn tại (admin_init).
  */
-function init_plugin_suite_rp_check_table() {
+function init_plugin_suite_reading_position_check_table() {
 	if ( ! current_user_can( 'administrator' ) ) {
 		return;
 	}
@@ -55,11 +55,11 @@ function init_plugin_suite_rp_check_table() {
 
 	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter
 	if ( $wpdb->get_var( "SHOW TABLES LIKE '$table'" ) !== $table ) {
-		init_plugin_suite_rp_create_table();
+		init_plugin_suite_reading_position_create_table();
 	}
 
-	if ( ! wp_next_scheduled( 'init_plugin_suite_rp_migration_event' ) ) {
-		wp_schedule_single_event( time() + 30, 'init_plugin_suite_rp_migration_event' );
+	if ( ! wp_next_scheduled( 'init_plugin_suite_reading_position_migration_event' ) ) {
+		wp_schedule_single_event( time() + 30, 'init_plugin_suite_reading_position_migration_event' );
 	}
 
 	update_option( 'irp_plugin_db_version', INIT_PLUGIN_SUITE_RP_VERSION );
@@ -83,7 +83,7 @@ function init_plugin_suite_rp_check_table() {
  *   user_id          – tìm tất cả bài của user
  *   post_id          – tìm tất cả user đọc 1 bài (admin use-case)
  */
-function init_plugin_suite_rp_create_table() {
+function init_plugin_suite_reading_position_create_table() {
 	global $wpdb;
 	$table_name      = $wpdb->prefix . 'init_rp_positions';
 	$charset_collate = $wpdb->get_charset_collate();
@@ -125,7 +125,7 @@ define( 'INIT_PLUGIN_SUITE_RP_MIGRATION_VERSION', 2 );
  *
  * Chạy theo batch 200 user/lần (idempotent – xóa meta sau khi migrate xong).
  */
-function init_plugin_suite_rp_maybe_migrate() {
+function init_plugin_suite_reading_position_maybe_migrate() {
 	$done = (int) get_option( 'irp_migration_done', 0 );
 	if ( $done >= INIT_PLUGIN_SUITE_RP_MIGRATION_VERSION ) {
 		return false;
@@ -150,12 +150,12 @@ function init_plugin_suite_rp_maybe_migrate() {
 	$user_ids = $wpdb->get_col(
 		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare
 		$wpdb->prepare(
-	        "SELECT DISTINCT user_id FROM {$wpdb->usermeta}
-	         WHERE ( $conditions )
-	         ORDER BY user_id ASC
-	         LIMIT 200",
-	        ...$meta_patterns
-	    )
+			"SELECT DISTINCT user_id FROM {$wpdb->usermeta}
+			 WHERE ( $conditions )
+			 ORDER BY user_id ASC
+			 LIMIT 200",
+			...$meta_patterns
+		)
 		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare
 	);
 
@@ -166,7 +166,7 @@ function init_plugin_suite_rp_maybe_migrate() {
 
 	foreach ( $user_ids as $user_id ) {
 		$user_id = (int) $user_id;
-		init_plugin_suite_rp_migrate_user( $user_id );
+		init_plugin_suite_reading_position_migrate_user( $user_id );
 	}
 
 	// Kiểm tra còn sót meta không
@@ -193,7 +193,7 @@ function init_plugin_suite_rp_maybe_migrate() {
  *
  * @param int $user_id
  */
-function init_plugin_suite_rp_migrate_user( $user_id ) {
+function init_plugin_suite_reading_position_migrate_user( $user_id ) {
 	global $wpdb;
 
 	// Lấy tất cả meta key khớp pattern của user này
@@ -227,7 +227,7 @@ function init_plugin_suite_rp_migrate_user( $user_id ) {
 		// Parse post_id + device từ meta key
 		// Canonical: _init_plugin_suite_reading_position_{post_id}_{device}
 		// Legacy:    _init_rp_{post_id}_{device}
-		$parsed = init_plugin_suite_rp_parse_meta_key( $meta_key );
+		$parsed = init_plugin_suite_reading_position_parse_meta_key( $meta_key );
 		if ( ! $parsed ) {
 			delete_user_meta( $user_id, $meta_key );
 			continue;
@@ -244,7 +244,7 @@ function init_plugin_suite_rp_migrate_user( $user_id ) {
 			$updated_at = current_time( 'mysql', true );
 		}
 
-		init_plugin_suite_rp_upsert(
+		init_plugin_suite_reading_position_upsert(
 			$user_id,
 			$post_id,
 			$device,
@@ -264,7 +264,7 @@ function init_plugin_suite_rp_migrate_user( $user_id ) {
  * @param string $meta_key
  * @return array|null  [ 'post_id' => int, 'device' => string ] hoặc null nếu không match.
  */
-function init_plugin_suite_rp_parse_meta_key( $meta_key ) {
+function init_plugin_suite_reading_position_parse_meta_key( $meta_key ) {
 	// Canonical pattern
 	if ( preg_match( '/^_init_plugin_suite_reading_position_(\d+)_(.+)$/', $meta_key, $m ) ) {
 		return [
@@ -293,7 +293,7 @@ function init_plugin_suite_rp_parse_meta_key( $meta_key ) {
  *
  * @return string
  */
-function init_plugin_suite_rp_table() {
+function init_plugin_suite_reading_position_table() {
 	global $wpdb;
 	return $wpdb->prefix . 'init_rp_positions';
 }
@@ -310,9 +310,9 @@ function init_plugin_suite_rp_table() {
  * @param string $updated_at   MySQL datetime UTC.
  * @return bool
  */
-function init_plugin_suite_rp_upsert( $user_id, $post_id, $device, $scroll_top, $percent, $screen_height, $updated_at = '' ) {
+function init_plugin_suite_reading_position_upsert( $user_id, $post_id, $device, $scroll_top, $percent, $screen_height, $updated_at = '' ) {
 	global $wpdb;
-	$table = init_plugin_suite_rp_table();
+	$table = init_plugin_suite_reading_position_table();
 
 	if ( $updated_at === '' ) {
 		$updated_at = current_time( 'mysql', true );
@@ -344,7 +344,7 @@ function init_plugin_suite_rp_upsert( $user_id, $post_id, $device, $scroll_top, 
 		return false;
 	}
 
-	init_plugin_suite_rp_invalidate_cache( $user_id, $post_id, $device );
+	init_plugin_suite_reading_position_invalidate_cache( $user_id, $post_id, $device );
 	return true;
 }
 
@@ -356,13 +356,13 @@ function init_plugin_suite_rp_upsert( $user_id, $post_id, $device, $scroll_top, 
  * @param string $device
  * @return array|null  Row dạng legacy hoặc null nếu không có.
  */
-function init_plugin_suite_rp_get( $user_id, $post_id, $device ) {
+function init_plugin_suite_reading_position_get( $user_id, $post_id, $device ) {
 	$user_id = (int) $user_id;
 	$post_id = (int) $post_id;
 	$device  = sanitize_key( $device );
 
-	$cache_key = init_plugin_suite_rp_cache_key( $user_id, $post_id, $device );
-	$group     = init_plugin_suite_rp_cache_group();
+	$cache_key = init_plugin_suite_reading_position_cache_key( $user_id, $post_id, $device );
+	$group     = init_plugin_suite_reading_position_cache_group();
 
 	$cached = wp_cache_get( $cache_key, $group );
 	if ( false !== $cached ) {
@@ -370,7 +370,7 @@ function init_plugin_suite_rp_get( $user_id, $post_id, $device ) {
 	}
 
 	global $wpdb;
-	$table = init_plugin_suite_rp_table();
+	$table = init_plugin_suite_reading_position_table();
 
 	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter
 	$row = $wpdb->get_row(
@@ -384,15 +384,15 @@ function init_plugin_suite_rp_get( $user_id, $post_id, $device ) {
 	);
 
 	if ( $row ) {
-		$data = init_plugin_suite_rp_row_to_legacy( $row );
-		wp_cache_set( $cache_key, $data, $group, init_plugin_suite_rp_cache_ttl() );
+		$data = init_plugin_suite_reading_position_row_to_legacy( $row );
+		wp_cache_set( $cache_key, $data, $group, init_plugin_suite_reading_position_cache_ttl() );
 		return $data;
 	}
 
 	// Fallback: thử đọc meta cũ (canonical rồi legacy)
-	$data = init_plugin_suite_rp_get_meta_fallback( $user_id, $post_id, $device );
+	$data = init_plugin_suite_reading_position_get_meta_fallback( $user_id, $post_id, $device );
 	// Lưu cache dù null để tránh hit DB lại (lưu '' thay cho null)
-	wp_cache_set( $cache_key, $data ?? '', $group, init_plugin_suite_rp_cache_ttl() );
+	wp_cache_set( $cache_key, $data ?? '', $group, init_plugin_suite_reading_position_cache_ttl() );
 	return $data;
 }
 
@@ -404,9 +404,9 @@ function init_plugin_suite_rp_get( $user_id, $post_id, $device ) {
  * @param string $device
  * @return bool
  */
-function init_plugin_suite_rp_delete( $user_id, $post_id, $device ) {
+function init_plugin_suite_reading_position_delete( $user_id, $post_id, $device ) {
 	global $wpdb;
-	$table = init_plugin_suite_rp_table();
+	$table = init_plugin_suite_reading_position_table();
 
 	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
 	$deleted = $wpdb->delete(
@@ -427,7 +427,7 @@ function init_plugin_suite_rp_delete( $user_id, $post_id, $device ) {
 		delete_user_meta( $user_id, $legacy );
 	}
 
-	init_plugin_suite_rp_invalidate_cache( $user_id, $post_id, $device );
+	init_plugin_suite_reading_position_invalidate_cache( $user_id, $post_id, $device );
 
 	return $deleted !== false;
 }
@@ -438,7 +438,7 @@ function init_plugin_suite_rp_delete( $user_id, $post_id, $device ) {
  * @param array $row
  * @return array
  */
-function init_plugin_suite_rp_row_to_legacy( array $row ) {
+function init_plugin_suite_reading_position_row_to_legacy( array $row ) {
 	return [
 		'scrollTop'    => (int) $row['scroll_top'],
 		'percent'      => (int) $row['percent'],
@@ -459,7 +459,7 @@ function init_plugin_suite_rp_row_to_legacy( array $row ) {
  * @param string $device
  * @return array|null
  */
-function init_plugin_suite_rp_get_meta_fallback( $user_id, $post_id, $device ) {
+function init_plugin_suite_reading_position_get_meta_fallback( $user_id, $post_id, $device ) {
 	$canonical = "_init_plugin_suite_reading_position_{$post_id}_{$device}";
 	$data      = get_user_meta( $user_id, $canonical, true );
 
@@ -477,28 +477,28 @@ function init_plugin_suite_rp_get_meta_fallback( $user_id, $post_id, $device ) {
 // Cache helpers
 // ==========================
 
-function init_plugin_suite_rp_cache_group() {
+function init_plugin_suite_reading_position_cache_group() {
 	return 'irp_positions';
 }
 
-function init_plugin_suite_rp_cache_ttl() {
+function init_plugin_suite_reading_position_cache_ttl() {
 	return 10 * MINUTE_IN_SECONDS;
 }
 
 /**
  * Cache key cho 1 (user, post, device).
  */
-function init_plugin_suite_rp_cache_key( $user_id, $post_id, $device ) {
+function init_plugin_suite_reading_position_cache_key( $user_id, $post_id, $device ) {
 	return 'pos_' . (int) $user_id . '_' . (int) $post_id . '_' . sanitize_key( $device );
 }
 
 /**
  * Xóa cache khi có thay đổi.
  */
-function init_plugin_suite_rp_invalidate_cache( $user_id, $post_id, $device ) {
+function init_plugin_suite_reading_position_invalidate_cache( $user_id, $post_id, $device ) {
 	wp_cache_delete(
-		init_plugin_suite_rp_cache_key( $user_id, $post_id, $device ),
-		init_plugin_suite_rp_cache_group()
+		init_plugin_suite_reading_position_cache_key( $user_id, $post_id, $device ),
+		init_plugin_suite_reading_position_cache_group()
 	);
 }
 
@@ -506,9 +506,9 @@ function init_plugin_suite_rp_invalidate_cache( $user_id, $post_id, $device ) {
 // Plugin update hook
 // ==========================
 
-add_action( 'upgrader_process_complete', 'init_plugin_suite_rp_on_update', 10, 2 );
+add_action( 'upgrader_process_complete', 'init_plugin_suite_reading_position_on_update', 10, 2 );
 
-function init_plugin_suite_rp_on_update( $upgrader_object, $options ) {
+function init_plugin_suite_reading_position_on_update( $upgrader_object, $options ) {
 	if (
 		isset( $options['action'], $options['type'] ) &&
 		$options['action'] === 'update' &&
@@ -516,14 +516,12 @@ function init_plugin_suite_rp_on_update( $upgrader_object, $options ) {
 		! empty( $options['plugins'] )
 	) {
 		foreach ( $options['plugins'] as $plugin_path ) {
-
 			if ( $plugin_path === plugin_basename( INIT_PLUGIN_SUITE_RP_FILE ) ) {
-
-				init_plugin_suite_rp_check_table();
+				init_plugin_suite_reading_position_check_table();
 
 				// reset + schedule lại luôn cho chắc
-				wp_clear_scheduled_hook( 'init_plugin_suite_rp_migration_event' );
-				wp_schedule_single_event( time() + 30, 'init_plugin_suite_rp_migration_event' );
+				wp_clear_scheduled_hook( 'init_plugin_suite_reading_position_migration_event' );
+				wp_schedule_single_event( time() + 30, 'init_plugin_suite_reading_position_migration_event' );
 
 				break;
 			}

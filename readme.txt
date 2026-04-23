@@ -1,14 +1,14 @@
 === Init Reading Position – Remember, Return, Continue ===
 Contributors: brokensmile.2103
-Tags: scroll, reading, reading progress, usermeta, resume reading
+Tags: scroll, reading, reading progress, resume reading, reading position
 Requires at least: 5.5
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 1.4.2
+Stable tag: 1.5
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Remembers reading position and auto-scrolls when returning. Works for guests (localStorage) and logged-in users (user meta, per device).
+Remembers reading position and auto-scrolls when returning. Works for guests (localStorage) and logged-in users (custom DB table, per device).
 
 == Description ==
 
@@ -28,7 +28,7 @@ GitHub repository: [https://github.com/brokensmile2103/init-reading-position](ht
 
 **Features**
 
-* Saves scroll position using localStorage (guests) or user_meta (logged-in users)
+* Saves scroll position using localStorage (guests) or a dedicated database table (logged-in users)
 * Smart device-based sync: remembers position separately for PC, Mobile, and Tablet
 * Automatically scrolls back on page load
 * Lightweight, no jQuery, no bloat
@@ -43,20 +43,28 @@ GitHub repository: [https://github.com/brokensmile2103/init-reading-position](ht
 
 == Frequently Asked Questions ==
 
-= Does it sync across devices? =  
-Yes. For logged-in users, scroll position is saved in user_meta, and stored separately for each device type (PC, Mobile, Tablet).
+= Does it sync across devices? =
+Yes. For logged-in users, scroll position is stored in a dedicated database table, saved separately for each device type (PC, Mobile, Tablet).
 
-= Will it work with custom post types? =  
+= Will it work with custom post types? =
 Yes. You can enable it for any public post type in the plugin settings page.
 
-= Will it slow down my site? =  
-No. It only runs a small JS script on enabled single pages and stores data efficiently.
+= Will it slow down my site? =
+No. It only runs a small JS script on enabled single pages and stores data efficiently in a dedicated table with indexed queries.
 
 == Screenshots ==
 
 1. Simple settings page — choose post types and optionally enter a CSS selector (e.g. `.entry-content`) to limit where reading progress is tracked.
 
 == Changelog ==
+
+= 1.5 – April 23, 2026 =
+- Improved: Device detection is now handled entirely by JavaScript — PHP no longer performs UA sniffing on the server side, eliminating mismatches between detected device on page load vs. save
+- Improved: Saved scroll position lookup now tries all three device slots (pc, mobile, tablet) in order, so the correct position is always restored regardless of which device the user was last on
+- Improved: Scope element bounds (`absTop`, `absBottom`) are now cached after DOMContentLoaded and refreshed on window resize — `getBoundingClientRect()` is no longer called on every scroll event
+- Improved: REST API rate limiting switched from transient-based to `wp_cache`-based — eliminates transient writes to `wp_options` on high-traffic sites; works best with an object cache (Redis/Memcached), degrades gracefully without one
+- Fixed: `autoClearOnEnd` with no CSS selector configured would never trigger the end-of-content clear; now correctly falls back to page-bottom detection in that case
+- No breaking changes — REST API, localStorage keys, and all existing settings remain fully compatible
 
 = 1.4 – April 21, 2026 =
 - Refactored: Migration now runs via a self-scheduling WP-Cron event instead of admin_init
@@ -79,7 +87,7 @@ No. It only runs a small JS script on enabled single pages and stores data effic
 
 = 1.2 – November 12, 2025 =
 - Added: Support for multiple CSS selectors separated by commas (e.g. `.entry-content, .post-content, #main`)
-- Added: Option “Auto-clear saved position at content end” (enabled by default)
+- Added: Option "Auto-clear saved position at content end" (enabled by default)
 - Improved: Scroll tracking now activates if the reader is inside *any* of the configured selector areas
 - Improved: Percent calculation prioritizes the selector in scope, falls back to whole page when outside all selectors
 - Behavior: When auto-clear is enabled, progress is cleared at the end of the content area; when disabled, it falls back to clearing at page end

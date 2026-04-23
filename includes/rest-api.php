@@ -31,13 +31,20 @@ add_action( 'rest_api_init', function () {
  * Handle scroll data saving (POST) and deleting (DELETE).
  *
  * Đã refactor: không còn dùng update_user_meta / delete_user_meta.
- * Mọi thao tác đọc/ghi đi qua custom table thông qua các helper trong db.php:
- *   - init_plugin_suite_rp_upsert()
- *   - init_plugin_suite_rp_delete()
- *   - init_plugin_suite_rp_get()
+ * Mọi thao tác đọc/ghi đi qua custom table thông qua các helper trong init.php:
+ *   - init_plugin_suite_reading_position_upsert()
+ *   - init_plugin_suite_reading_position_delete()
+ *   - init_plugin_suite_reading_position_get()
  *
- * Fallback về meta cũ vẫn được xử lý trong init_plugin_suite_rp_get() cho
+ * Fallback về meta cũ vẫn được xử lý trong init_plugin_suite_reading_position_get() cho
  * các user chưa được migrate, đảm bảo backward-compatibility.
+ *
+ * Rate limiting: tối đa 1 POST save / 5 giây / user (wp_cache-based).
+ * Chỉ hoạt động khi site có Object Cache (Redis/Memcached) — zero DB writes.
+ * Không có Object Cache → wp_cache là in-memory per-request → rate limit
+ * không xuyên request được, nhưng hoàn toàn vô hại; JS SEND_INTERVAL=5000ms
+ * vẫn là lớp bảo vệ chính cho trường hợp đó.
+ * DELETE không bị rate-limit vì là thao tác dọn dẹp, ít khi xảy ra.
  *
  * @param WP_REST_Request $request
  * @return WP_REST_Response|WP_Error
@@ -53,11 +60,10 @@ function init_plugin_suite_reading_position_handle_scroll_request( WP_REST_Reque
         return new WP_Error( 'invalid_post', __( 'Invalid post.', 'init-reading-position' ), [ 'status' => 400 ] );
     }
 
-    $device = (string) $request->get_param( 'device' );
+    $device = sanitize_key( (string) $request->get_param( 'device' ) );
     if ( $device === '' ) {
-        $device = wp_is_mobile() ? 'mobile' : 'pc';
+        $device = 'pc';
     }
-    $device = sanitize_key( $device );
 
     $method = $request->get_method();
 
@@ -72,12 +78,25 @@ function init_plugin_suite_reading_position_handle_scroll_request( WP_REST_Reque
         );
 
         if ( $should_delete ) {
-            $deleted = init_plugin_suite_rp_delete( $user_id, $post_id, $device );
+            $deleted = init_plugin_suite_reading_position_delete( $user_id, $post_id, $device );
             return rest_ensure_response( [ 'deleted' => $deleted ] );
         }
 
         return rest_ensure_response( [ 'deleted' => false ] );
     }
+
+    // ===== POST: rate limiting (5s / user, wp_cache-based) =====
+    // DELETE không bị giới hạn vì là thao tác dọn dẹp cuối bài.
+    // wp_cache → zero DB writes; hoạt động tốt nhất khi có Object Cache.
+    // Không có Object Cache thì rate limit không xuyên request được,
+    // nhưng JS SEND_INTERVAL=5000ms vẫn là lớp bảo vệ chính.
+    $rate_key           = 'irp_rl_' . $user_id;
+    $rate_limit_seconds = (int) apply_filters( 'init_plugin_suite_reading_position_rate_limit', 5 );
+    if ( wp_cache_get( $rate_key, 'irp_rate_limit' ) ) {
+        // Vẫn trả 200 để JS không retry; chỉ skip việc ghi DB.
+        return rest_ensure_response( [ 'success' => true, 'throttled' => true ] );
+    }
+    wp_cache_set( $rate_key, 1, 'irp_rate_limit', $rate_limit_seconds );
 
     // ===== POST: save/update =====
     $scroll_top    = max( 0, (int) ( $request->get_param( 'scroll' )        ?? 0 ) );
@@ -107,7 +126,7 @@ function init_plugin_suite_reading_position_handle_scroll_request( WP_REST_Reque
     $screen_height = max( 0, (int) ( $data['screenHeight'] ?? $screen_height ) );
     $updated_at    = sanitize_text_field( $data['updated'] ?? $updated_at );
 
-    $saved = init_plugin_suite_rp_upsert(
+    $saved = init_plugin_suite_reading_position_upsert(
         $user_id,
         $post_id,
         $device,

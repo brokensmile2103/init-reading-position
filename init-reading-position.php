@@ -3,7 +3,7 @@
  * Plugin Name: Init Reading Position
  * Description: Remembers where readers left off in a post and automatically scrolls back to that spot when they return. Lightweight, localStorage-based.
  * Plugin URI: https://inithtml.com/plugin/init-reading-position/
- * Version: 1.4.2
+ * Version: 1.5
  * Author: Init HTML
  * Author URI: https://inithtml.com/
  * Text Domain: init-reading-position
@@ -18,7 +18,7 @@
 if ( ! defined( 'ABSPATH' ) ) exit;
 
 // === Constants (standardized to INIT_PLUGIN_SUITE_READING_POSITION_*) ===
-define( 'INIT_PLUGIN_SUITE_RP_VERSION', '1.4.2' );
+define( 'INIT_PLUGIN_SUITE_RP_VERSION', '1.5' );
 define( 'INIT_PLUGIN_SUITE_RP_FILE',    __FILE__ );
 define( 'INIT_PLUGIN_SUITE_RP_PATH',    plugin_dir_path( __FILE__ ) );
 define( 'INIT_PLUGIN_SUITE_RP_URL',     plugin_dir_url( __FILE__ ) );
@@ -44,28 +44,25 @@ add_action( 'wp_enqueue_scripts', function () {
         true
     );
 
-    $delay           = (int) apply_filters( 'init_plugin_suite_reading_position_delay', 1000 );
-    $user_logged_in  = is_user_logged_in();
+    $delay          = (int) apply_filters( 'init_plugin_suite_reading_position_delay', 1000 );
+    $user_logged_in = is_user_logged_in();
+
+    // Device detection được trust hoàn toàn từ JS (getDevice()).
+    // PHP chỉ cần truyền savedPosition cho logged-in user.
+    // JS sẽ gửi đúng device string lên REST API khi save/delete.
     $scroll_position = 0;
 
     if ( $user_logged_in ) {
         $post_id = get_the_ID();
-        $device  = 'pc';
 
-        if ( wp_is_mobile() ) {
-            $device = 'mobile';
-        } elseif ( isset( $_SERVER['HTTP_USER_AGENT'] ) ) {
-            // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- sanitized below
-            $user_agent = sanitize_text_field( wp_unslash( $_SERVER['HTTP_USER_AGENT'] ) );
-            if ( stripos( $user_agent, 'iPad' ) !== false ) {
-                $device = 'tablet';
+        // Thử cả 3 device theo thứ tự ưu tiên để lấy position gần nhất.
+        // JS sẽ tự detect đúng device và ghi đè lên đúng slot khi save.
+        foreach ( [ 'pc', 'mobile', 'tablet' ] as $d ) {
+            $data = init_plugin_suite_reading_position_get( get_current_user_id(), $post_id, $d );
+            if ( is_array( $data ) && ! empty( $data['scrollTop'] ) ) {
+                $scroll_position = (int) $data['scrollTop'];
+                break;
             }
-        }
-
-        $data = init_plugin_suite_rp_get( get_current_user_id(), $post_id, sanitize_key( $device ) );
-
-        if ( is_array( $data ) && isset( $data['scrollTop'] ) ) {
-            $scroll_position = (int) $data['scrollTop'];
         }
     }
 
@@ -100,10 +97,10 @@ require_once INIT_PLUGIN_SUITE_RP_PATH . 'includes/rest-api.php';
 // Settings link
 // ==========================
 
-add_filter('plugin_action_links_' . plugin_basename(__FILE__), 'init_plugin_suite_reading_position_add_settings_link');
+add_filter( 'plugin_action_links_' . plugin_basename( __FILE__ ), 'init_plugin_suite_reading_position_add_settings_link' );
 // Add a "Settings" link to the plugin row in the Plugins admin screen
-function init_plugin_suite_reading_position_add_settings_link($links) {
-    $settings_link = '<a href="' . admin_url('options-general.php?page=' . INIT_PLUGIN_SUITE_RP_SLUG) . '">' . __('Settings', 'init-reading-position') . '</a>';
-    array_unshift($links, $settings_link);
+function init_plugin_suite_reading_position_add_settings_link( $links ) {
+    $settings_link = '<a href="' . admin_url( 'options-general.php?page=' . INIT_PLUGIN_SUITE_RP_SLUG ) . '">' . __( 'Settings', 'init-reading-position' ) . '</a>';
+    array_unshift( $links, $settings_link );
     return $links;
 }
