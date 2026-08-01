@@ -15,6 +15,10 @@ add_action( 'admin_init', function () {
 	}
 } );
 
+// Tracks the one-time redundant-index cleanup (schema < 1.7 → 1.7). Bump only if a future
+// version needs another index migration to run again.
+define( 'INIT_PLUGIN_SUITE_RP_INDEX_MIGRATION_VERSION', 1 );
+
 /**
  * Activation hook – single site hoặc toàn multisite network.
  */
@@ -58,11 +62,45 @@ function init_plugin_suite_reading_position_check_table() {
 		init_plugin_suite_reading_position_create_table();
 	}
 
+	init_plugin_suite_reading_position_maybe_drop_redundant_index();
+
 	if ( ! wp_next_scheduled( 'init_plugin_suite_reading_position_migration_event' ) ) {
 		wp_schedule_single_event( time() + 30, 'init_plugin_suite_reading_position_migration_event' );
 	}
 
 	update_option( 'irp_plugin_db_version', INIT_PLUGIN_SUITE_RP_VERSION );
+}
+
+/**
+ * Dọn index `user_id` dư thừa còn sót lại từ schema < 1.7 (xem docblock của
+ * init_plugin_suite_reading_position_create_table()). Idempotent, chỉ chạy 1 lần
+ * (tracked qua option `irp_index_migration_done`), an toàn cho cả site cài mới
+ * (schema 1.7 vốn không tạo index này ngay từ đầu) lẫn site nâng cấp.
+ */
+function init_plugin_suite_reading_position_maybe_drop_redundant_index() {
+	$done = (int) get_option( 'irp_index_migration_done', 0 );
+	if ( $done >= INIT_PLUGIN_SUITE_RP_INDEX_MIGRATION_VERSION ) {
+		return;
+	}
+
+	global $wpdb;
+	$table = init_plugin_suite_reading_position_table();
+
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter
+	if ( $wpdb->get_var( "SHOW TABLES LIKE '$table'" ) !== $table ) {
+		// Bảng chưa tồn tại (chưa qua activation) – không có gì để dọn, thử lại ở lần check_table() kế tiếp.
+		return;
+	}
+
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter
+	$index_exists = $wpdb->get_row( "SHOW INDEX FROM $table WHERE Key_name = 'user_id'" );
+
+	if ( $index_exists ) {
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter, WordPress.DB.DirectDatabaseQuery.SchemaChange
+		$wpdb->query( "ALTER TABLE $table DROP INDEX user_id" );
+	}
+
+	update_option( 'irp_index_migration_done', INIT_PLUGIN_SUITE_RP_INDEX_MIGRATION_VERSION, false );
 }
 
 /**
@@ -79,9 +117,14 @@ function init_plugin_suite_reading_position_check_table() {
  *   updated_at    – UTC timestamp ISO 8601 (mysql)
  *
  * Index:
- *   user_post_device – UNIQUE để mỗi (user, post, device) chỉ có 1 row → dùng INSERT … ON DUPLICATE KEY UPDATE
- *   user_id          – tìm tất cả bài của user
- *   post_id          – tìm tất cả user đọc 1 bài (admin use-case)
+ *   user_post_device – UNIQUE để mỗi (user, post, device) chỉ có 1 row → dùng INSERT … ON DUPLICATE KEY UPDATE.
+ *                      Nhờ leftmost-prefix rule của MySQL, index này cũng tự phục vụ mọi query lọc theo
+ *                      user_id hoặc (user_id, post_id) → KHÔNG cần thêm KEY user_id riêng (đỡ 1 B-tree phải
+ *                      maintain mỗi lần INSERT/UPDATE, giảm write overhead).
+ *   post_id           – tìm tất cả user đọc 1 bài (admin use-case), không nằm trong prefix của unique key nên vẫn cần riêng.
+ *
+ * Site nâng cấp từ bản < 1.7 có thể còn index `user_id` cũ; xem
+ * init_plugin_suite_reading_position_maybe_drop_redundant_index() để dọn an toàn, chạy đúng 1 lần.
  */
 function init_plugin_suite_reading_position_create_table() {
 	global $wpdb;
@@ -101,7 +144,6 @@ function init_plugin_suite_reading_position_create_table() {
 		updated_at DATETIME NOT NULL,
 		PRIMARY KEY (id),
 		UNIQUE KEY user_post_device (user_id, post_id, device),
-		KEY user_id (user_id),
 		KEY post_id (post_id)
 	) $charset_collate;";
 
@@ -186,6 +228,23 @@ function init_plugin_suite_reading_position_maybe_migrate() {
 	}
 
 	return true;
+}
+
+/**
+ * Kiểm tra migration user_meta → DB đã hoàn tất chưa (memoized theo request).
+ * Dùng để bỏ qua get_meta_fallback() khi đã chắc chắn không còn meta cũ nào –
+ * tránh 1-2 lượt get_user_meta() thừa cho mỗi lần đọc chưa có cache.
+ *
+ * @return bool
+ */
+function init_plugin_suite_reading_position_migration_is_done() {
+	static $done = null;
+
+	if ( null === $done ) {
+		$done = ( (int) get_option( 'irp_migration_done', 0 ) >= INIT_PLUGIN_SUITE_RP_MIGRATION_VERSION );
+	}
+
+	return $done;
 }
 
 /**
@@ -441,7 +500,11 @@ function init_plugin_suite_reading_position_get( $user_id, $post_id, $device = '
 		return $data;
 	}
 
-	$data = init_plugin_suite_reading_position_get_meta_fallback( $user_id, $post_id, $device );
+	// Chỉ còn thử đọc user_meta cũ khi migration chưa xác nhận xong; phần lớn site
+	// đã migrate từ lâu nên nhánh này thường được bỏ qua hoàn toàn.
+	$data = init_plugin_suite_reading_position_migration_is_done()
+		? null
+		: init_plugin_suite_reading_position_get_meta_fallback( $user_id, $post_id, $device );
 
 	wp_cache_set( $cache_key, $data ?? '', $group, init_plugin_suite_reading_position_cache_ttl() );
 	return $data;

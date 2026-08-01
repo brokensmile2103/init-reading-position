@@ -2,9 +2,9 @@
 Contributors: brokensmile.2103
 Tags: scroll, reading, reading progress, resume reading, reading position
 Requires at least: 5.5
-Tested up to: 6.9
+Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 1.6
+Stable tag: 1.7
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -57,6 +57,16 @@ No. It only runs a small JS script on enabled single pages and stores data effic
 1. Simple settings page — choose post types and optionally enter a CSS selector (e.g. `.entry-content`) to limit where reading progress is tracked.
 
 == Changelog ==
+
+= 1.7 – August 1, 2026 =
+- Added: Behavior-based sync engine replacing the fixed 5-second timer — the script now only talks to the server on meaningful checkpoints (a real upward reversal while re-reading, an occasional heartbeat while continuously reading forward, or right before the tab is hidden/closed), cutting network requests dramatically for the common case of a reader scrolling straight through an article
+- Improved: The furthest scroll position ever reached is what gets persisted, not the current position — scrolling back up to re-read a section never regresses the saved/resume point, for both logged-in users and guests (localStorage)
+- Improved: Scroll and resize listeners are now registered as passive — the browser no longer waits on the handler before scrolling, removing a source of jank on scroll-heavy pages
+- Improved: Full-page scroll height is now cached alongside scoped-element bounds instead of being read on every debounced scroll tick — avoids repeated layout-forcing reads; refreshed on resize and once after full page load
+- Added: Best-effort final save on tab hide/close (`pagehide` / `visibilitychange`) using `navigator.sendBeacon` where available — the last known position is no longer lost when a reader closes the tab between two sync checkpoints
+- Improved: Reading position lookups now skip the legacy user_meta fallback entirely once the user_meta → database migration is confirmed complete — removes 1-2 unnecessary lookups per uncached request on the vast majority of sites
+- Improved: Removed a redundant `user_id` database index — it duplicated the leftmost prefix of the existing `user_post_device` unique key, so dropping it removes unnecessary index-maintenance overhead on every write with no read-performance impact. Existing sites get this cleaned up automatically and safely, exactly once, on upgrade
+- No breaking changes — REST API, database schema (aside from the redundant index removal above), localStorage keys, and frontend behavior remain fully compatible
 
 = 1.6 – April 23, 2026 =
 - Improved: Reading position retrieval is now handled via a single bulk query instead of multiple per-device lookups — reduces database queries and improves performance for logged-in users

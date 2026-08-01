@@ -11,8 +11,8 @@ function init_plugin_suite_reading_position_migration_runner() {
     $has_more = init_plugin_suite_reading_position_maybe_migrate();
 
     if ( $has_more ) {
-        // Schedule lại cái mới sau 30s
-        wp_schedule_single_event( time() + 30, 'init_plugin_suite_reading_position_migration_event' );
+        // Schedule lại cái mới sau 5s
+        wp_schedule_single_event( time() + 5, 'init_plugin_suite_reading_position_migration_event' );
     }
 
     delete_transient( 'irp_migration_lock' );
@@ -20,6 +20,6 @@ function init_plugin_suite_reading_position_migration_runner() {
 
 register_activation_hook( INIT_PLUGIN_SUITE_RP_FILE, function () {
     if ( ! wp_next_scheduled( 'init_plugin_suite_reading_position_migration_event' ) ) {
-        wp_schedule_single_event( time() + 30, 'init_plugin_suite_reading_position_migration_event' );
+        wp_schedule_single_event( time() + 5, 'init_plugin_suite_reading_position_migration_event' );
     }
 } );
