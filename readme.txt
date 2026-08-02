@@ -4,7 +4,7 @@ Tags: scroll, reading, reading progress, resume reading, reading position
 Requires at least: 5.5
 Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 1.7
+Stable tag: 1.8
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -57,6 +57,15 @@ No. It only runs a small JS script on enabled single pages and stores data effic
 1. Simple settings page — choose post types and optionally enter a CSS selector (e.g. `.entry-content`) to limit where reading progress is tracked.
 
 == Changelog ==
+
+= 1.8 – August 2, 2026 =
+- Fixed: The frontend script could fail to enqueue on every page of the site whenever the option controlling enabled post types had never been saved (fresh installs, or sites where the admin never opened Settings) — a mismatched default value caused the enabled post-type list to resolve to empty instead of the intended `post` default
+- Fixed: Reading position saves could silently fail intermittently ("works, then doesn't") — the script previously marked a position as synced as soon as a save request was sent, without waiting for server confirmation; combined with server-side rate limiting on sites with a persistent object cache (Redis/Memcached), some saves were silently dropped while the script believed they had succeeded, resulting in stale or incorrect resume positions
+- Added: The final save sent when a tab is hidden/closed now bypasses server-side rate limiting and always writes straight to the database — this is the last chance to persist unsaved progress, so it's no longer subject to being silently throttled or deferred away
+- Improved: Save requests to the REST API now return an explicit `throttled` status instead of a false "success" when rate-limited, so the script can correctly retry instead of assuming the position was saved
+- Added: On sites with a persistent object cache, heartbeat saves (the periodic safety-net sync sent while a reader keeps scrolling forward, as opposed to a real re-read reversal or the final save) are now written to cache instead of the database. This cuts sustained database write load dramatically on high-concurrency sites — e.g. a manga/webtoon theme with tens of thousands of simultaneously reading logged-in users — while page reloads still resume from the correct position, since reads are cache-first. Progress is always promoted to a real, durable database write at the next meaningful checkpoint (re-read reversal or tab close). Sites without a persistent object cache are unaffected and continue writing straight to the database, same as before
+- Added: The heartbeat interval (default 30s) is now filterable via `init_plugin_suite_reading_position_heartbeat`, letting high-traffic sites widen the safety-net cadence to further reduce request volume at peak hours without editing plugin files
+- No breaking changes — REST API, database schema, localStorage keys, and frontend behavior remain fully compatible
 
 = 1.7 – August 1, 2026 =
 - Added: Behavior-based sync engine replacing the fixed 5-second timer — the script now only talks to the server on meaningful checkpoints (a real upward reversal while re-reading, an occasional heartbeat while continuously reading forward, or right before the tab is hidden/closed), cutting network requests dramatically for the common case of a reader scrolling straight through an article

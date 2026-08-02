@@ -620,6 +620,65 @@ function init_plugin_suite_reading_position_invalidate_cache( $user_id, $post_id
 	wp_cache_delete(init_plugin_suite_reading_position_bulk_cache_key( $user_id, $post_id ), $group);
 }
 
+/**
+ * Ghi CHỈ vào object cache — KHÔNG đụng tới DB.
+ *
+ * Dùng cho các lần lưu "heartbeat" (lưới an toàn trong lúc đang đọc tiếp,
+ * không phải checkpoint thật sự như reversal/final) trên site có persistent
+ * object cache (Redis/Memcached). Mục đích: ở traffic rất lớn (hàng chục
+ * nghìn reader đang đọc đồng thời — ví dụ theme Init Manga giờ cao điểm),
+ * heartbeat cứ 30s/reader cộng dồn lại thành hàng trăm UPSERT/giây liên tục
+ * vào MySQL dù phần lớn trong số đó sẽ bị ghi đè lại chỉ vài chục giây sau.
+ *
+ * Vì trang tải lại luôn đọc qua init_plugin_suite_reading_position_get()
+ * (ưu tiên cache trước DB), việc chỉ cập nhật cache vẫn đảm bảo hiển thị
+ * đúng vị trí ngay cả khi DB tạm thời chưa được ghi. Dữ liệu sẽ được ghi
+ * thật vào DB ở lần reversal-sync hoặc final-flush kế tiếp (xem
+ * includes/rest-api.php) — nghĩa là trong trường hợp xấu nhất (site sập/
+ * cache bị evict giữa hai checkpoint đó), phạm vi có thể mất chỉ tương đương
+ * đúng bằng khoảng cách giữa 2 checkpoint thật, không hơn so với heartbeat
+ * ghi DB trực tiếp trước đây.
+ *
+ * KHÔNG gọi hàm này nếu site không có persistent object cache — cache khi đó
+ * chỉ tồn tại trong 1 request nên ghi cache-only tương đương với mất dữ liệu
+ * hoàn toàn. Caller (rest-api.php) tự kiểm tra wp_using_ext_object_cache()
+ * trước khi gọi.
+ *
+ * @param int    $user_id
+ * @param int    $post_id
+ * @param string $device
+ * @param int    $scroll_top
+ * @param int    $percent
+ * @param int    $screen_height
+ * @param string $updated_at
+ */
+function init_plugin_suite_reading_position_cache_only_update( $user_id, $post_id, $device, $scroll_top, $percent, $screen_height, $updated_at ) {
+	$data = [
+		'scrollTop'    => (int) $scroll_top,
+		'percent'      => (int) $percent,
+		'screenHeight' => (int) $screen_height,
+		'updated'      => $updated_at,
+		'postId'       => (int) $post_id,
+		'device'       => sanitize_key( $device ),
+		// Chưa có row DB thật cho bản ghi cache-only này tại thời điểm này.
+		'_id'          => 0,
+	];
+
+	$group = init_plugin_suite_reading_position_cache_group();
+	$ttl   = init_plugin_suite_reading_position_cache_ttl();
+
+	wp_cache_set( init_plugin_suite_reading_position_cache_key( $user_id, $post_id, $device ), $data, $group, $ttl );
+
+	// Đồng bộ luôn bulk cache (dùng khi localize cả 3 device một lần) để
+	// tránh đọc trúng giá trị cũ từ DB nếu bulk cache đang có sẵn.
+	$bulk_key = init_plugin_suite_reading_position_bulk_cache_key( $user_id, $post_id );
+	$bulk     = wp_cache_get( $bulk_key, $group );
+	if ( is_array( $bulk ) ) {
+		$bulk[ $data['device'] ] = $data;
+		wp_cache_set( $bulk_key, $bulk, $group, $ttl );
+	}
+}
+
 // ==========================
 // Plugin update hook
 // ==========================

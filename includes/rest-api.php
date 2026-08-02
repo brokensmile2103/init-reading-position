@@ -39,11 +39,14 @@ add_action( 'rest_api_init', function () {
  * Fallback về meta cũ vẫn được xử lý trong init_plugin_suite_reading_position_get() cho
  * các user chưa được migrate, đảm bảo backward-compatibility.
  *
- * Rate limiting: tối đa 1 POST save / 5 giây / user (wp_cache-based).
+ * Rate limiting: tối đa 1 POST save / 5 giây / user (wp_cache-based), trừ
+ * request `final=1` (lưu cuối trước khi rời trang) luôn được cho qua.
  * Chỉ hoạt động khi site có Object Cache (Redis/Memcached) — zero DB writes.
  * Không có Object Cache → wp_cache là in-memory per-request → rate limit
- * không xuyên request được, nhưng hoàn toàn vô hại; JS SEND_INTERVAL=5000ms
- * vẫn là lớp bảo vệ chính cho trường hợp đó.
+ * không xuyên request được, nhưng hoàn toàn vô hại; JS MIN_SEND_GAP_MS
+ * vẫn là lớp bảo vệ chính cho trường hợp đó. Khi bị throttle, response trả
+ * `success:false, throttled:true` (KHÔNG giả vờ thành công) để JS biết và
+ * thử lại ở checkpoint kế tiếp thay vì đánh dấu nhầm là đã đồng bộ.
  * DELETE không bị rate-limit vì là thao tác dọn dẹp, ít khi xảy ra.
  *
  * @param WP_REST_Request $request
@@ -90,22 +93,101 @@ function init_plugin_suite_reading_position_handle_scroll_request( WP_REST_Reque
     // DELETE không bị giới hạn vì là thao tác dọn dẹp cuối bài.
     // wp_cache → zero DB writes; hoạt động tốt nhất khi có Object Cache.
     // Không có Object Cache thì rate limit không xuyên request được,
-    // nhưng JS SEND_INTERVAL=5000ms vẫn là lớp bảo vệ chính.
-    $rate_key           = 'irp_rl_' . $user_id;
-    $rate_limit_seconds = (int) apply_filters( 'init_plugin_suite_reading_position_rate_limit', 5 );
-    if ( wp_cache_get( $rate_key, 'irp_rate_limit' ) ) {
-        // Vẫn trả 200 để JS không retry; chỉ skip việc ghi DB.
-        return rest_ensure_response( [ 'success' => true, 'throttled' => true ] );
+    // nhưng JS MIN_SEND_GAP_MS vẫn là lớp bảo vệ chính.
+    //
+    // `final=1` (gửi từ sendFinalPosition() qua sendBeacon/keepalive khi tab
+    // bị ẩn/đóng) LUÔN bỏ qua rate limit VÀ luôn ghi DB thật: đây là cơ hội
+    // lưu cuối cùng trước khi rời trang, không có lần thử lại nào sau đó.
+    $is_final     = (bool) $request->get_param( 'final' );
+    $is_heartbeat = ! $is_final && (bool) $request->get_param( 'heartbeat' );
+
+    // ===== Heartbeat trên site có persistent object cache: ghi cache, bỏ DB =====
+    // Heartbeat chỉ là lưới an toàn trong lúc đọc tiếp (không phải checkpoint
+    // thật như reversal/final) — ở traffic rất lớn (chục nghìn reader đang
+    // đọc đồng thời, ví dụ giờ cao điểm của theme Init Manga), heartbeat mỗi
+    // 30s/reader cộng dồn thành hàng trăm UPSERT/giây liên tục vào MySQL, phần
+    // lớn sẽ bị ghi đè lại chỉ vài chục giây sau bởi chính heartbeat kế tiếp
+    // hoặc final flush. Ghi cache-only ở đây giảm tải DB đáng kể mà không ảnh
+    // hưởng độ chính xác: trang tải lại vẫn đọc đúng vị trí (ưu tiên cache),
+    // dữ liệu được ghi thật vào DB ở lần reversal/final kế tiếp.
+    //
+    // wp_using_ext_object_cache() kiểm tra có object cache PERSISTENT không
+    // (Redis/Memcached...). Không có thì cache chỉ sống trong 1 request — ghi
+    // cache-only lúc đó coi như mất dữ liệu, nên fallback về ghi DB bình
+    // thường như trước, đúng tinh thần "graceful degradation" mà rate limiter
+    // ở trên cũng đang áp dụng.
+    if ( $is_heartbeat && wp_using_ext_object_cache() ) {
+        $data = init_plugin_suite_reading_position_extract_payload( $request, $post_id, $device, $user_id );
+
+        init_plugin_suite_reading_position_cache_only_update(
+            $user_id,
+            $post_id,
+            $device,
+            $data['scrollTop'],
+            $data['percent'],
+            $data['screenHeight'],
+            $data['updated']
+        );
+
+        return rest_ensure_response( [
+            'success' => true,
+            'cached'  => true, // đã lưu vào cache, chưa chắc đã ghi DB — chỉ để debug/log, JS không cần phân biệt
+            'data'    => $data,
+        ] );
     }
-    wp_cache_set( $rate_key, 1, 'irp_rate_limit', $rate_limit_seconds );
+
+    if ( ! $is_final ) {
+        $rate_key           = 'irp_rl_' . $user_id;
+        $rate_limit_seconds = (int) apply_filters( 'init_plugin_suite_reading_position_rate_limit', 5 );
+        if ( wp_cache_get( $rate_key, 'irp_rate_limit' ) ) {
+            // Trả throttled:true (KHÔNG phải success) để JS biết request này
+            // chưa thực sự được lưu và cần thử lại ở checkpoint kế tiếp.
+            return rest_ensure_response( [ 'success' => false, 'throttled' => true ] );
+        }
+        wp_cache_set( $rate_key, 1, 'irp_rate_limit', $rate_limit_seconds );
+    }
 
     // ===== POST: save/update =====
+    $data = init_plugin_suite_reading_position_extract_payload( $request, $post_id, $device, $user_id );
+
+    $saved = init_plugin_suite_reading_position_upsert(
+        $user_id,
+        $post_id,
+        $device,
+        $data['scrollTop'],
+        $data['percent'],
+        $data['screenHeight'],
+        $data['updated']
+    );
+
+    if ( ! $saved ) {
+        return new WP_Error( 'db_error', __( 'Could not save reading position.', 'init-reading-position' ), [ 'status' => 500 ] );
+    }
+
+    return rest_ensure_response( [
+        'success' => true,
+        'data'    => $data,
+    ] );
+}
+
+/**
+ * Đọc + chuẩn hóa scroll/percent/screen_height từ request, áp dụng filter
+ * `init_plugin_suite_reading_position_data_to_store` rồi đọc lại giá trị sau
+ * filter (developer bên ngoài có thể đã chỉnh). Dùng chung cho cả nhánh ghi
+ * DB thật và nhánh ghi cache-only (heartbeat) để tránh trùng lặp logic.
+ *
+ * @param WP_REST_Request $request
+ * @param int              $post_id
+ * @param string           $device
+ * @param int              $user_id
+ * @return array{scrollTop:int,percent:int,screenHeight:int,updated:string,postId:int,device:string}
+ */
+function init_plugin_suite_reading_position_extract_payload( WP_REST_Request $request, $post_id, $device, $user_id ) {
     $scroll_top    = max( 0, (int) ( $request->get_param( 'scroll' )        ?? 0 ) );
     $percent       = min( 100, max( 0, (int) ( $request->get_param( 'percent' )       ?? 0 ) ) );
     $screen_height = max( 0, (int) ( $request->get_param( 'screen_height' ) ?? 0 ) );
     $updated_at    = current_time( 'mysql', true );
 
-    // Giữ lại filter để developer bên ngoài có thể can thiệp vào data trước khi lưu
     $data = apply_filters(
         'init_plugin_suite_reading_position_data_to_store',
         [
@@ -121,28 +203,12 @@ function init_plugin_suite_reading_position_handle_scroll_request( WP_REST_Reque
         $user_id
     );
 
-    // Đọc lại các giá trị sau filter (developer có thể đã chỉnh)
-    $scroll_top    = max( 0, (int) ( $data['scrollTop']    ?? $scroll_top ) );
-    $percent       = min( 100, max( 0, (int) ( $data['percent']       ?? $percent ) ) );
-    $screen_height = max( 0, (int) ( $data['screenHeight'] ?? $screen_height ) );
-    $updated_at    = sanitize_text_field( $data['updated'] ?? $updated_at );
-
-    $saved = init_plugin_suite_reading_position_upsert(
-        $user_id,
-        $post_id,
-        $device,
-        $scroll_top,
-        $percent,
-        $screen_height,
-        $updated_at
-    );
-
-    if ( ! $saved ) {
-        return new WP_Error( 'db_error', __( 'Could not save reading position.', 'init-reading-position' ), [ 'status' => 500 ] );
-    }
-
-    return rest_ensure_response( [
-        'success' => true,
-        'data'    => $data,
-    ] );
+    return [
+        'scrollTop'    => max( 0, (int) ( $data['scrollTop']    ?? $scroll_top ) ),
+        'percent'      => min( 100, max( 0, (int) ( $data['percent']       ?? $percent ) ) ),
+        'screenHeight' => max( 0, (int) ( $data['screenHeight'] ?? $screen_height ) ),
+        'updated'      => sanitize_text_field( $data['updated'] ?? $updated_at ),
+        'postId'       => (int) $post_id,
+        'device'       => $device,
+    ];
 }

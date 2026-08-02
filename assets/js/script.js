@@ -138,49 +138,82 @@ document.addEventListener('DOMContentLoaded', function () {
     // the worst case (e.g. the tab is killed without pagehide/visibilitychange
     // ever firing) without reintroducing frequent polling.
     const REVERSE_THRESHOLD_PX = 80;
-    const HEARTBEAT_MS         = 30000;
+    const HEARTBEAT_MS         = (InitRPData.heartbeatMs > 0) ? InitRPData.heartbeatMs : 30000;
     const MIN_SEND_GAP_MS      = 1000; // hard floor between any two network sends
 
-    let maxY     = Math.max(savedPosition, parseInt(localStorage.getItem(storageKey), 10) || 0, window.scrollY || 0);
-    let syncedY  = savedPosition; // what the server already has; 0/unused for guests
-    let runPeakY = maxY;
-    let dir      = null; // 'down' | 'up'
-    let lastSent = Date.now(); // treat page load as t0 so heartbeat doesn't fire on the first tick
+    let maxY      = Math.max(savedPosition, parseInt(localStorage.getItem(storageKey), 10) || 0, window.scrollY || 0);
+    // syncedY: vị trí đã được server XÁC NHẬN nhận (cache HOẶC DB) — dùng để
+    // tránh gửi lặp lại cùng một giá trị chưa đổi.
+    // dbSyncedY: vị trí ĐÃ CHẮC CHẮN nằm trong DB (không phải cache-only) —
+    // dùng riêng để quyết định final flush có cần ghi DB không. Heartbeat
+    // cache-only (xem rest-api.php) chỉ nâng syncedY, KHÔNG nâng dbSyncedY,
+    // để lần reversal/final kế tiếp vẫn ghi DB thật, không bị "tưởng nhầm"
+    // là đã bền vững chỉ vì đã có trong cache.
+    let syncedY   = savedPosition;
+    let dbSyncedY = savedPosition;
+    let runPeakY  = maxY;
+    let dir       = null; // 'down' | 'up'
+    let lastSent  = Date.now(); // treat page load as t0 so heartbeat doesn't fire on the first tick
 
     let timeout;
     let lastScrollY      = window.scrollY || window.pageYOffset || 0;
     let lastKnownInnerH  = window.innerHeight || 0;
 
+    /**
+     * Gửi payload lên server. Trả về Promise<object|null> — object (body đã
+     * parse) chỉ khi server XÁC NHẬN thành công (không throttle, không lỗi
+     * mạng/HTTP); null nếu thất bại dưới mọi hình thức.
+     */
     function sendPayload(extra) {
-        fetch(restBase, {
+        return fetch(restBase, {
             method: 'POST',
             headers: headersJSON,
             credentials: 'same-origin',
             body: JSON.stringify(Object.assign({ post_id: postId, device: device }, extra))
-        }).catch(() => {});
+        })
+            .then(function (r) {
+                if (!r.ok) return null;
+                return r.json().then(function (json) {
+                    return (json && json.success === true) ? json : null;
+                });
+            })
+            .catch(function () { return null; });
     }
 
     /**
      * Persist `y` (always the furthest point, maxY) as the saved position.
      * Guarded by MIN_SEND_GAP_MS so a reversal-trigger and a heartbeat-trigger
      * can never double-fire back to back.
+     *
+     * syncedY/dbSyncedY chỉ tăng lên SAU KHI server xác nhận (thay vì
+     * optimistic-update ngay khi gửi như trước) — nếu server throttle/lỗi,
+     * checkpoint kế tiếp sẽ tự retry vì maxY vẫn còn lớn hơn watermark tương
+     * ứng, thay vì JS "tưởng" đã lưu rồi bỏ luôn.
      */
-    function syncPosition(y, now) {
+    function syncPosition(y, now, isHeartbeat) {
         if (!isLoggedIn) return;
         if (now - lastSent < MIN_SEND_GAP_MS) return;
         lastSent = now;
-        syncedY  = y;
 
         const innerH  = window.innerHeight || lastKnownInnerH;
         const percent = computePercent(y, innerH);
+        const extra   = { scroll: y, percent: percent, screen_height: innerH };
+        if (isHeartbeat) extra.heartbeat = 1;
 
-        sendPayload({ scroll: y, percent: percent, screen_height: innerH });
+        sendPayload(extra).then(function (json) {
+            if (!json) return;
+            syncedY = Math.max(syncedY, y);
+            if (!json.cached) {
+                dbSyncedY = Math.max(dbSyncedY, y);
+            }
+        });
     }
 
     function clearPosition(now) {
-        maxY     = 0;
-        syncedY  = 0;
-        runPeakY = 0;
+        maxY      = 0;
+        syncedY   = 0;
+        dbSyncedY = 0;
+        runPeakY  = 0;
         localStorage.removeItem(storageKey);
 
         if (isLoggedIn) {
@@ -191,14 +224,18 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // Best-effort final save when the tab is hidden/closed — flushes any
     // unsynced progress (maxY) via sendBeacon so it survives page teardown.
+    // So sánh với dbSyncedY (không phải syncedY): nếu tiến độ gần nhất chỉ
+    // mới nằm trong cache (từ một heartbeat) chứ chưa thật sự vào DB, final
+    // flush vẫn phải chạy để ghi DB thật — đây là cơ hội cuối cùng.
+    // `final: 1` báo server bỏ qua rate limit VÀ bỏ qua nhánh cache-only.
     function sendFinalPosition() {
         if (!isLoggedIn) return;
-        if (maxY <= syncedY) return; // nothing new to persist
+        if (maxY <= dbSyncedY) return; // đã chắc chắn nằm trong DB rồi, không có gì để ghi thêm
 
         const now = Date.now();
-        if (now - lastSent < MIN_SEND_GAP_MS) return;
-        lastSent = now;
-        syncedY  = maxY;
+        lastSent  = now;
+        syncedY   = maxY;
+        dbSyncedY = maxY; // fire-and-forget (beacon/keepalive không có response để xác nhận)
 
         const innerH  = window.innerHeight || lastKnownInnerH;
         const percent = computePercent(maxY, innerH);
@@ -208,7 +245,8 @@ document.addEventListener('DOMContentLoaded', function () {
             device:        device,
             scroll:        maxY,
             percent:       percent,
-            screen_height: innerH
+            screen_height: innerH,
+            final:         1
         });
 
         if (navigator.sendBeacon) {
@@ -271,14 +309,18 @@ document.addEventListener('DOMContentLoaded', function () {
                     // Still reading forward, but it's been a while since the last
                     // sync — send a heartbeat so a crash/kill can't lose too much.
                     if (maxY > syncedY && (now - lastSent) >= HEARTBEAT_MS) {
-                        syncPosition(maxY, now);
+                        syncPosition(maxY, now, true);
                     }
                 } else if (dir === 'up') {
                     const reversedBy = runPeakY - viewportY;
-                    if (reversedBy >= REVERSE_THRESHOLD_PX && maxY > syncedY) {
+                    // So với dbSyncedY (không phải syncedY): nếu maxY hiện tại mới
+                    // chỉ được một heartbeat cache-only báo cáo, vẫn cần một lần
+                    // ghi DB thật khi người đọc quay lại đọc (reversal) — tránh vị
+                    // trí "kẹt" mãi trong cache mà không bao giờ được ghi bền vững.
+                    if (reversedBy >= REVERSE_THRESHOLD_PX && maxY > dbSyncedY) {
                         // Real backscroll (re-reading), not hand jitter — persist
                         // the furthest point reached, not this lower position.
-                        syncPosition(maxY, now);
+                        syncPosition(maxY, now, false);
                     }
                 }
             }

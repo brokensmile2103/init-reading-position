@@ -3,7 +3,7 @@
  * Plugin Name: Init Reading Position
  * Description: Remembers where readers left off in a post and automatically scrolls back to that spot when they return. Lightweight, localStorage-based.
  * Plugin URI: https://inithtml.com/plugin/init-reading-position/
- * Version: 1.7
+ * Version: 1.8
  * Author: Init HTML
  * Author URI: https://inithtml.com/
  * Text Domain: init-reading-position
@@ -18,7 +18,7 @@
 if ( ! defined( 'ABSPATH' ) ) exit;
 
 // === Constants (standardized to INIT_PLUGIN_SUITE_READING_POSITION_*) ===
-define( 'INIT_PLUGIN_SUITE_RP_VERSION', '1.7' );
+define( 'INIT_PLUGIN_SUITE_RP_VERSION', '1.8' );
 define( 'INIT_PLUGIN_SUITE_RP_FILE',    __FILE__ );
 define( 'INIT_PLUGIN_SUITE_RP_PATH',    plugin_dir_path( __FILE__ ) );
 define( 'INIT_PLUGIN_SUITE_RP_URL',     plugin_dir_url( __FILE__ ) );
@@ -31,10 +31,13 @@ define( 'INIT_PLUGIN_SUITE_RP_NAMESPACE', 'initrepo/v1' );
 add_action( 'wp_enqueue_scripts', function () {
     if ( ! is_singular() ) return;
 
-    $enabled_types = get_option( 'init_plugin_suite_reading_position_post_types', [] );
+    $enabled_types = get_option( 'init_plugin_suite_reading_position_post_types', [ 'post' ] );
+    if ( ! is_array( $enabled_types ) ) {
+        $enabled_types = [ 'post' ];
+    }
     $enabled_types = apply_filters( 'init_plugin_suite_reading_position_enabled_types', $enabled_types );
 
-    if ( ! in_array( get_post_type(), $enabled_types, true ) ) return;
+    if ( ! in_array( get_post_type(), (array) $enabled_types, true ) ) return;
 
     wp_enqueue_script(
         'init-plugin-suite-reading-position',
@@ -45,11 +48,9 @@ add_action( 'wp_enqueue_scripts', function () {
     );
 
     $delay          = (int) apply_filters( 'init_plugin_suite_reading_position_delay', 1000 );
+    $heartbeat_ms   = (int) apply_filters( 'init_plugin_suite_reading_position_heartbeat', 30000 );
     $user_logged_in = is_user_logged_in();
 
-    // Device detection được trust hoàn toàn từ JS (getDevice()).
-    // PHP chỉ cần truyền savedPositions cho logged-in user.
-    // JS sẽ gửi đúng device string lên REST API khi save/delete.
     $saved_positions = [
         'pc'     => 0,
         'mobile' => 0,
@@ -80,6 +81,7 @@ add_action( 'wp_enqueue_scripts', function () {
         'restUrl'        => esc_url_raw( rest_url( INIT_PLUGIN_SUITE_RP_NAMESPACE ) ),
         'postId'         => get_the_ID(),
         'delay'          => $delay,
+        'heartbeatMs'    => $heartbeat_ms,
         'loggedIn'       => $user_logged_in,
         'savedPositions' => $saved_positions,
         'nonce'          => wp_create_nonce( 'wp_rest' ),
