@@ -4,7 +4,7 @@
 
 **Auto-resume reading. Per-device sync. Built for scale. No jQuery. No bloat.**
 
-[![Version](https://img.shields.io/badge/stable-v1.8-blue.svg)](https://wordpress.org/plugins/init-reading-position/)
+[![Version](https://img.shields.io/badge/stable-v1.9-blue.svg)](https://wordpress.org/plugins/init-reading-position/)
 [![License](https://img.shields.io/badge/license-GPLv2-blue.svg)](https://www.gnu.org/licenses/gpl-2.0.html)
 ![Made with ❤️ in HCMC](https://img.shields.io/badge/Made%20with-%E2%9D%A4%EF%B8%8F%20in%20HCMC-blue)
 
@@ -32,6 +32,8 @@ Perfect for long articles, tutorials, documentation, web novels, manga/webtoon r
 - Optional settings page to choose enabled post types
 - Developer-friendly filters for customization
 - Translation-ready (`.pot` file included)
+- Automatic orphan cleanup — reading positions are removed the moment their post or user account is permanently deleted
+- Optional, off-by-default housekeeping to prune abandoned or long-untouched reading positions on large, long-running sites
 
 ## How It Works
 
@@ -56,6 +58,17 @@ Settings → Reading Position
 Enable the feature for any public post type (posts, pages, custom post types like *manga*, *docs*, *tutorials*, etc.).
 
 Optionally enter a CSS selector (e.g. `.entry-content`) to restrict scroll tracking to a specific content area only.
+
+## Housekeeping
+
+**Automatic, always on:** when a post or a user account is permanently deleted, any reading positions pointing to it are cleaned up in the background right away — no leftover rows for content or accounts that no longer exist.
+
+**Optional, off by default:** two extra cleanup jobs are available under **Settings → Reading Position** for large, long-running sites that want to keep the table lean over time:
+
+- **Clean up abandoned progress** — removes a single saved position only when it hasn't been touched in a long time (default 365 days) *and* progress on it is very low (default under 10%). A position with meaningful progress is always kept, no matter how old, since the reader may still come back to finish it.
+- **Clean up inactive accounts** — removes *all* saved positions for an account once none of its reading positions, across every post, have been updated in a long time (default 730 days).
+
+Both jobs walk the table in small, self-throttling batches via WP-Cron — no new database index, no long-running query, and zero effect on sites that leave them off.
 
 ## Developer Filters
 
