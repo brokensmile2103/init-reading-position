@@ -1,34 +1,149 @@
 msgid ""
 msgstr ""
-"Project-Id-Version: Init Reading Position 1.0\n"
+"Project-Id-Version: Init Reading Position 1.9\n"
+"Report-Msgid-Bugs-To: https://wordpress.org/support/plugin/init-reading-"
+"position\n"
+"POT-Creation-Date: 2026-09-09T18:52:54+00:00\n"
+"PO-Revision-Date: 2026-09-10T00:00:00+00:00\n"
+"Last-Translator: Init HTML\n"
+"Language-Team: Vietnamese\n"
 "Language: vi\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 
+#. Plugin Name of the plugin
+#: init-reading-position.php includes/settings-page.php:7
+#: includes/settings-page.php:8
 msgid "Init Reading Position"
 msgstr "Init Reading Position"
 
-msgid "Settings"
-msgstr "Cài đặt"
+#. Plugin URI of the plugin
+#: init-reading-position.php
+msgid "https://inithtml.com/plugin/init-reading-position/"
+msgstr ""
 
-msgid "Remembers where readers left off in a post and automatically scrolls back to that spot when they return. Lightweight, localStorage-based."
-msgstr "Ghi nhớ vị trí đọc trong bài viết và tự động cuộn lại đúng chỗ khi người đọc quay lại. Nhẹ, dùng localStorage."
+#. Description of the plugin
+#: init-reading-position.php
+msgid ""
+"Remembers where readers left off in a post and automatically scrolls back to "
+"that spot when they return. Lightweight, localStorage-based."
+msgstr ""
+"Ghi nhớ vị trí đọc trong bài viết và tự động cuộn lại đúng chỗ khi người đọc "
+"quay lại. Nhẹ, dùng localStorage."
 
+#. Author of the plugin
+#: init-reading-position.php
+msgid "Init HTML"
+msgstr ""
+
+#. Author URI of the plugin
+#: init-reading-position.php
+msgid "https://inithtml.com/"
+msgstr ""
+
+#: includes/rest-api.php:58
+msgid "Authentication required."
+msgstr "Yêu cầu đăng nhập."
+
+#: includes/rest-api.php:63
+msgid "Invalid post."
+msgstr "Bài viết không hợp lệ."
+
+#: includes/rest-api.php:164
+msgid "Could not save reading position."
+msgstr "Không thể lưu vị trí đọc."
+
+#: includes/settings-page.php:126
 msgid "Init Reading Position Settings"
 msgstr "Cài đặt Init Reading Position"
 
+#: includes/settings-page.php:131
 msgid "Enable for post types:"
 msgstr "Bật cho các loại nội dung:"
 
+#: includes/settings-page.php:148
 msgid "Content area selector"
 msgstr "Selector vùng nội dung"
 
-msgid "Optional. Enter a CSS selector that defines where reading progress is tracked."
+#: includes/settings-page.php:159
+msgid ""
+"Optional. Enter a CSS selector that defines where reading progress is "
+"tracked."
 msgstr "Tùy chọn. Nhập CSS selector xác định vùng cần theo dõi vị trí đọc."
 
+#: includes/settings-page.php:167
 msgid "Auto-clear saved position at content end"
 msgstr "Tự động xóa vị trí lưu khi đọc đến cuối nội dung"
 
-msgid "Automatically remove the saved reading position when the reader reaches the end of the content area."
-msgstr "Tự động xóa vị trí đọc đã lưu khi người dùng kéo đến cuối vùng nội dung."
+#: includes/settings-page.php:177
+msgid ""
+"Automatically remove the saved reading position when the reader reaches the "
+"end of the content area."
+msgstr ""
+"Tự động xóa vị trí đọc đã lưu khi người dùng kéo đến cuối vùng nội dung."
+
+#: includes/settings-page.php:184
+msgid "Clean up abandoned progress"
+msgstr "Dọn dẹp tiến độ đọc bị bỏ dở"
+
+#: includes/settings-page.php:193
+msgid ""
+"Periodically delete individual reading positions that are both old and "
+"barely started."
+msgstr "Định kỳ xóa từng vị trí đọc vừa cũ vừa mới đọc rất ít."
+
+#. translators: 1: number of days input field, 2: percent input field
+#: includes/settings-page.php:199
+#, php-format
+msgid ""
+"Delete a saved position when it has not been updated in at least %1$s days "
+"AND its progress is below %2$s%%."
+msgstr ""
+"Xóa 1 vị trí đã lưu khi nó không được cập nhật trong ít nhất %1$s ngày VÀ "
+"tiến độ đọc dưới %2$s%%."
+
+#: includes/settings-page.php:206
+msgid ""
+"Only rows matching both conditions are removed — a position with high "
+"progress is kept even if very old, since the reader may still return to "
+"finish it."
+msgstr ""
+"Chỉ xóa những dòng khớp cả 2 điều kiện — vị trí có tiến độ cao vẫn được giữ "
+"lại dù rất cũ, vì người đọc có thể quay lại đọc tiếp."
+
+#: includes/settings-page.php:213
+msgid "Clean up inactive accounts"
+msgstr "Dọn dẹp tài khoản không hoạt động"
+
+#: includes/settings-page.php:222
+msgid ""
+"Periodically delete ALL saved reading positions belonging to accounts that "
+"have not read anything in a long time."
+msgstr ""
+"Định kỳ xóa TOÀN BỘ vị trí đọc đã lưu của những tài khoản đã lâu không đọc "
+"gì."
+
+#. translators: %s: number of days input field
+#: includes/settings-page.php:228
+#, php-format
+msgid ""
+"A user is considered inactive when none of their reading positions (on any "
+"post) have been updated in at least %s days."
+msgstr ""
+"Một người dùng được coi là không hoạt động khi không có vị trí đọc nào của "
+"họ (ở bất kỳ bài nào) được cập nhật trong ít nhất %s ngày."
+
+#: includes/settings-page.php:234
+msgid ""
+"This is separate from the option above — it looks at the account as a whole, "
+"not a single post, and removes every saved position for that account, "
+"regardless of how much progress was made."
+msgstr ""
+"Tùy chọn này độc lập với mục phía trên — nó xét toàn bộ tài khoản chứ không "
+"phải 1 bài viết cụ thể, và xóa mọi vị trí đã lưu của tài khoản đó, bất kể "
+"tiến độ đọc là bao nhiêu."
+
+#: init-reading-position.php:113
+msgid "Settings"
+msgstr "Cài đặt"

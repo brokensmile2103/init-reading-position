@@ -3,13 +3,13 @@
  * Plugin Name: Init Reading Position
  * Description: Remembers where readers left off in a post and automatically scrolls back to that spot when they return. Lightweight, localStorage-based.
  * Plugin URI: https://inithtml.com/plugin/init-reading-position/
- * Version: 1.8
+ * Version: 1.9
  * Author: Init HTML
  * Author URI: https://inithtml.com/
  * Text Domain: init-reading-position
  * Domain Path: /languages
  * Requires at least: 5.5
- * Tested up to: 7.0
+ * Tested up to: 7.1
  * Requires PHP: 7.4
  * License: GPLv2 or later
  * License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -18,7 +18,7 @@
 if ( ! defined( 'ABSPATH' ) ) exit;
 
 // === Constants (standardized to INIT_PLUGIN_SUITE_READING_POSITION_*) ===
-define( 'INIT_PLUGIN_SUITE_RP_VERSION', '1.8' );
+define( 'INIT_PLUGIN_SUITE_RP_VERSION', '1.9' );
 define( 'INIT_PLUGIN_SUITE_RP_FILE',    __FILE__ );
 define( 'INIT_PLUGIN_SUITE_RP_PATH',    plugin_dir_path( __FILE__ ) );
 define( 'INIT_PLUGIN_SUITE_RP_URL',     plugin_dir_url( __FILE__ ) );
@@ -100,6 +100,7 @@ if ( is_admin() ) {
 }
 require_once INIT_PLUGIN_SUITE_RP_PATH . 'includes/init.php';
 require_once INIT_PLUGIN_SUITE_RP_PATH . 'includes/cron.php';
+require_once INIT_PLUGIN_SUITE_RP_PATH . 'includes/cleanup.php';
 require_once INIT_PLUGIN_SUITE_RP_PATH . 'includes/rest-api.php';
 
 // ==========================

@@ -31,14 +31,28 @@ function init_plugin_suite_reading_position_uninstall_site() {
 	delete_option( 'init_plugin_suite_reading_position_post_types' );
 	delete_option( 'init_plugin_suite_reading_position_selector' );
 	delete_option( 'init_plugin_suite_reading_position_auto_clear_on_end' );
+	delete_option( 'init_plugin_suite_reading_position_cleanup_stale_enabled' );
+	delete_option( 'init_plugin_suite_reading_position_cleanup_stale_days' );
+	delete_option( 'init_plugin_suite_reading_position_cleanup_stale_percent' );
+	delete_option( 'init_plugin_suite_reading_position_cleanup_inactive_enabled' );
+	delete_option( 'init_plugin_suite_reading_position_cleanup_inactive_days' );
 
 	// === Internal state options ===
 	delete_option( 'irp_plugin_db_version' );
 	delete_option( 'irp_migration_done' );
+	delete_option( 'irp_cleanup_stale_cursor' );
+	delete_option( 'irp_cleanup_stale_last_run' );
+	delete_option( 'irp_cleanup_inactive_cursor' );
+	delete_option( 'irp_cleanup_inactive_last_run' );
 
 	// === Transients ===
 	delete_transient( 'irp_migration_lock' );
+	delete_transient( 'irp_cleanup_stale_lock' );
+	delete_transient( 'irp_cleanup_inactive_lock' );
 
 	// === Scheduled cron events ===
 	wp_clear_scheduled_hook( 'init_plugin_suite_reading_position_migration_event' );
+	wp_clear_scheduled_hook( 'init_plugin_suite_reading_position_cleanup_daily_event' );
+	wp_clear_scheduled_hook( 'init_plugin_suite_reading_position_cleanup_stale_event' );
+	wp_clear_scheduled_hook( 'init_plugin_suite_reading_position_cleanup_inactive_event' );
 }

@@ -2,9 +2,9 @@
 Contributors: brokensmile.2103
 Tags: scroll, reading, reading progress, resume reading, reading position
 Requires at least: 5.5
-Tested up to: 7.0
+Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.8
+Stable tag: 1.9
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -34,6 +34,8 @@ GitHub repository: [https://github.com/brokensmile2103/init-reading-position](ht
 * Lightweight, no jQuery, no bloat
 * Easy to extend via filters
 * Optional settings page to control which post types are enabled
+* Automatically cleans up orphaned data when a post or a user account is permanently deleted
+* Optional, off-by-default housekeeping to remove abandoned or very old reading positions on large, long-running sites
 
 == Installation ==
 
@@ -52,11 +54,30 @@ Yes. You can enable it for any public post type in the plugin settings page.
 = Will it slow down my site? =
 No. It only runs a small JS script on enabled single pages and stores data efficiently in a dedicated table with indexed queries.
 
+= Does it clean up after itself when a post or user is deleted? =
+Yes. When a post is permanently deleted, or a user account is permanently deleted, any reading positions pointing to it are automatically removed in the background — no leftover rows for content or accounts that no longer exist.
+
+= Does it delete my readers' progress automatically? =
+Not unless you turn it on. Two housekeeping options are available under Settings → Reading Position, both **disabled by default**:
+
+* **Clean up abandoned progress** — removes a single saved position only when it hasn't been touched in a long time (configurable, default 365 days) *and* progress on it is very low (configurable, default under 10%). A position with high progress is always kept, no matter how old, since the reader may still come back to finish it.
+* **Clean up inactive accounts** — removes *all* saved positions for an account once none of its reading positions, across every post, have been updated in a long time (configurable, default 730 days).
+
+Both run in small background batches (via WP-Cron) so they never lock up the database, and both pause immediately if you turn them back off.
+
 == Screenshots ==
 
 1. Simple settings page — choose post types and optionally enter a CSS selector (e.g. `.entry-content`) to limit where reading progress is tracked.
 
 == Changelog ==
+
+= 1.9 – September 10, 2026 =
+- Added: Reading positions are now automatically deleted when their post or their user account is permanently deleted — previously these rows were left behind indefinitely, silently pointing at content or accounts that no longer exist
+- Added: Optional "Clean up abandoned progress" setting (disabled by default) — periodically deletes a saved position only when it is both older than a configurable number of days (default 365) and its progress is below a configurable percentage (default 10%); positions with meaningful progress are never touched, no matter how old
+- Added: Optional "Clean up inactive accounts" setting (disabled by default) — periodically deletes every saved position belonging to an account once none of its reading positions, across any post, have been updated in a configurable number of days (default 730)
+- Improved: Both cleanup jobs run in small self-throttling batches via WP-Cron, walking the table by primary key (or by the existing `user_post_device` index prefix) — no new database index required, no long-running query, and no impact on sites that leave both options off
+- Improved: Turning a cleanup option on from the settings page starts the corresponding job right away instead of waiting for the next scheduled check
+- No breaking changes — REST API, database schema, localStorage keys, and frontend behavior remain fully compatible; both new cleanup options ship disabled and change nothing unless explicitly enabled
 
 = 1.8 – August 2, 2026 =
 - Fixed: The frontend script could fail to enqueue on every page of the site whenever the option controlling enabled post types had never been saved (fresh installs, or sites where the admin never opened Settings) — a mismatched default value caused the enabled post-type list to resolve to empty instead of the intended `post` default

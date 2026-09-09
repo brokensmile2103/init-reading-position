@@ -547,6 +547,90 @@ function init_plugin_suite_reading_position_delete( $user_id, $post_id, $device 
 }
 
 /**
+ * Xóa toàn bộ reading position của 1 bài viết – dọn dữ liệu mồ côi khi bài
+ * viết bị xóa vĩnh viễn (post_id không còn trỏ tới nội dung nào cả).
+ *
+ * Lấy trước danh sách (user_id, device) liên quan NGAY BÂY GIỜ vì sau khi
+ * DELETE thì không còn cách nào tra lại được nữa – cùng pattern với
+ * init_plugin_suite_reading_position_delete_by_user() bên dưới.
+ *
+ * @param int $post_id
+ * @return int Số dòng đã xóa.
+ */
+function init_plugin_suite_reading_position_delete_by_post( $post_id ) {
+	$post_id = (int) $post_id;
+	if ( $post_id <= 0 ) {
+		return 0;
+	}
+
+	global $wpdb;
+	$table = init_plugin_suite_reading_position_table();
+
+	// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, PluginCheck.Security.DirectDB.UnescapedDBParameter
+	$affected = $wpdb->get_results(
+		$wpdb->prepare(
+			"SELECT user_id, device FROM {$table} WHERE post_id = %d",
+			$post_id
+		),
+		ARRAY_A
+	);
+	// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+	$deleted = $wpdb->delete( $table, [ 'post_id' => $post_id ], [ '%d' ] );
+
+	if ( ! empty( $affected ) ) {
+		foreach ( $affected as $row ) {
+			init_plugin_suite_reading_position_invalidate_cache( (int) $row['user_id'], $post_id, $row['device'] );
+		}
+	}
+
+	return (int) $deleted;
+}
+add_action( 'before_delete_post', 'init_plugin_suite_reading_position_delete_by_post' );
+
+/**
+ * Xóa toàn bộ reading position của 1 user – dọn dữ liệu mồ côi khi tài
+ * khoản bị xóa vĩnh viễn (user_id không còn trỏ tới tài khoản nào cả).
+ *
+ * @param int $user_id
+ * @return int Số dòng đã xóa.
+ */
+function init_plugin_suite_reading_position_delete_by_user( $user_id ) {
+	$user_id = (int) $user_id;
+	if ( $user_id <= 0 ) {
+		return 0;
+	}
+
+	global $wpdb;
+	$table = init_plugin_suite_reading_position_table();
+
+	// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, PluginCheck.Security.DirectDB.UnescapedDBParameter
+	$affected = $wpdb->get_results(
+		$wpdb->prepare(
+			"SELECT post_id, device FROM {$table} WHERE user_id = %d",
+			$user_id
+		),
+		ARRAY_A
+	);
+	// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+	$deleted = $wpdb->delete( $table, [ 'user_id' => $user_id ], [ '%d' ] );
+
+	if ( ! empty( $affected ) ) {
+		foreach ( $affected as $row ) {
+			init_plugin_suite_reading_position_invalidate_cache( $user_id, (int) $row['post_id'], $row['device'] );
+		}
+	}
+
+	return (int) $deleted;
+}
+add_action( 'deleted_user', 'init_plugin_suite_reading_position_delete_by_user' );
+
+/**
  * Chuyển 1 DB row sang format legacy (tương thích với code cũ đọc meta).
  *
  * @param array $row

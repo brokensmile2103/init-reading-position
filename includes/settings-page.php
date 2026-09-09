@@ -45,6 +45,58 @@ add_action( 'admin_init', function () {
             'default'           => 1,
         ]
     );
+
+    // === Cleanup: đọc dở bị bỏ (1 dòng cụ thể) – mặc định TẮT ===
+    register_setting(
+        'init_plugin_suite_reading_position_settings_group',
+        'init_plugin_suite_reading_position_cleanup_stale_enabled',
+        [
+            'sanitize_callback' => 'init_plugin_suite_reading_position_sanitize_bool',
+            'type'              => 'boolean',
+            'default'           => 0,
+        ]
+    );
+
+    register_setting(
+        'init_plugin_suite_reading_position_settings_group',
+        'init_plugin_suite_reading_position_cleanup_stale_days',
+        [
+            'sanitize_callback' => 'init_plugin_suite_reading_position_sanitize_stale_days',
+            'type'              => 'integer',
+            'default'           => 365,
+        ]
+    );
+
+    register_setting(
+        'init_plugin_suite_reading_position_settings_group',
+        'init_plugin_suite_reading_position_cleanup_stale_percent',
+        [
+            'sanitize_callback' => 'init_plugin_suite_reading_position_sanitize_stale_percent',
+            'type'              => 'integer',
+            'default'           => 10,
+        ]
+    );
+
+    // === Cleanup: tài khoản không hoạt động (toàn bộ user) – mặc định TẮT ===
+    register_setting(
+        'init_plugin_suite_reading_position_settings_group',
+        'init_plugin_suite_reading_position_cleanup_inactive_enabled',
+        [
+            'sanitize_callback' => 'init_plugin_suite_reading_position_sanitize_bool',
+            'type'              => 'boolean',
+            'default'           => 0,
+        ]
+    );
+
+    register_setting(
+        'init_plugin_suite_reading_position_settings_group',
+        'init_plugin_suite_reading_position_cleanup_inactive_days',
+        [
+            'sanitize_callback' => 'init_plugin_suite_reading_position_sanitize_inactive_days',
+            'type'              => 'integer',
+            'default'           => 730,
+        ]
+    );
 } );
 
 // === Render settings page ===
@@ -63,6 +115,12 @@ function init_plugin_suite_reading_position_render_settings_page() {
 
     $selector   = get_option( 'init_plugin_suite_reading_position_selector', '' );
     $auto_clear = (bool) get_option( 'init_plugin_suite_reading_position_auto_clear_on_end', 1 );
+
+    $cleanup_stale_enabled    = (bool) get_option( 'init_plugin_suite_reading_position_cleanup_stale_enabled', 0 );
+    $cleanup_stale_days       = (int) get_option( 'init_plugin_suite_reading_position_cleanup_stale_days', 365 );
+    $cleanup_stale_percent    = (int) get_option( 'init_plugin_suite_reading_position_cleanup_stale_percent', 10 );
+    $cleanup_inactive_enabled = (bool) get_option( 'init_plugin_suite_reading_position_cleanup_inactive_enabled', 0 );
+    $cleanup_inactive_days    = (int) get_option( 'init_plugin_suite_reading_position_cleanup_inactive_days', 730 );
     ?>
     <div class="wrap">
         <h1><?php esc_html_e( 'Init Reading Position Settings', 'init-reading-position' ); ?></h1>
@@ -120,6 +178,63 @@ function init_plugin_suite_reading_position_render_settings_page() {
                         </label>
                     </td>
                 </tr>
+
+                <tr>
+                    <th scope="row">
+                        <?php esc_html_e( 'Clean up abandoned progress', 'init-reading-position' ); ?>
+                    </th>
+                    <td>
+                        <label>
+                            <input type="checkbox"
+                                   id="init_plugin_suite_reading_position_cleanup_stale_enabled"
+                                   name="init_plugin_suite_reading_position_cleanup_stale_enabled"
+                                   value="1"
+                                   <?php checked( $cleanup_stale_enabled ); ?> />
+                            <?php esc_html_e( 'Periodically delete individual reading positions that are both old and barely started.', 'init-reading-position' ); ?>
+                        </label>
+                        <p class="description">
+                            <?php
+                            printf(
+                                /* translators: 1: number of days input field, 2: percent input field */
+                                esc_html__( 'Delete a saved position when it has not been updated in at least %1$s days AND its progress is below %2$s%%.', 'init-reading-position' ),
+                                '<input type="number" min="30" step="1" style="width:80px" name="init_plugin_suite_reading_position_cleanup_stale_days" value="' . esc_attr( $cleanup_stale_days ) . '" />',
+                                '<input type="number" min="0" max="100" step="1" style="width:70px" name="init_plugin_suite_reading_position_cleanup_stale_percent" value="' . esc_attr( $cleanup_stale_percent ) . '" />'
+                            );
+                            ?>
+                        </p>
+                        <p class="description">
+                            <?php esc_html_e( 'Only rows matching both conditions are removed — a position with high progress is kept even if very old, since the reader may still return to finish it.', 'init-reading-position' ); ?>
+                        </p>
+                    </td>
+                </tr>
+
+                <tr>
+                    <th scope="row">
+                        <?php esc_html_e( 'Clean up inactive accounts', 'init-reading-position' ); ?>
+                    </th>
+                    <td>
+                        <label>
+                            <input type="checkbox"
+                                   id="init_plugin_suite_reading_position_cleanup_inactive_enabled"
+                                   name="init_plugin_suite_reading_position_cleanup_inactive_enabled"
+                                   value="1"
+                                   <?php checked( $cleanup_inactive_enabled ); ?> />
+                            <?php esc_html_e( 'Periodically delete ALL saved reading positions belonging to accounts that have not read anything in a long time.', 'init-reading-position' ); ?>
+                        </label>
+                        <p class="description">
+                            <?php
+                            printf(
+                                /* translators: %s: number of days input field */
+                                esc_html__( 'A user is considered inactive when none of their reading positions (on any post) have been updated in at least %s days.', 'init-reading-position' ),
+                                '<input type="number" min="30" step="1" style="width:80px" name="init_plugin_suite_reading_position_cleanup_inactive_days" value="' . esc_attr( $cleanup_inactive_days ) . '" />'
+                            );
+                            ?>
+                        </p>
+                        <p class="description">
+                            <?php esc_html_e( 'This is separate from the option above — it looks at the account as a whole, not a single post, and removes every saved position for that account, regardless of how much progress was made.', 'init-reading-position' ); ?>
+                        </p>
+                    </td>
+                </tr>
             </table>
             <?php submit_button(); ?>
         </form>
@@ -152,4 +267,36 @@ function init_plugin_suite_reading_position_sanitize_selector( $input ) {
 
 function init_plugin_suite_reading_position_sanitize_bool( $value ) {
     return ( ! empty( $value ) ) ? 1 : 0;
+}
+
+/**
+ * Sàng lọc ngưỡng "số ngày" cho cleanup dữ liệu đọc dở bị bỏ.
+ * Chặn dưới 30 ngày để tránh cấu hình quá tay xóa nhầm tiến độ còn mới.
+ *
+ * @param mixed $value
+ * @return int
+ */
+function init_plugin_suite_reading_position_sanitize_stale_days( $value ) {
+    return max( 30, absint( $value ) );
+}
+
+/**
+ * Sàng lọc ngưỡng "phần trăm" cho cleanup dữ liệu đọc dở bị bỏ (0-100).
+ *
+ * @param mixed $value
+ * @return int
+ */
+function init_plugin_suite_reading_position_sanitize_stale_percent( $value ) {
+    return min( 100, absint( $value ) );
+}
+
+/**
+ * Sàng lọc ngưỡng "số ngày không hoạt động" cho cleanup theo tài khoản.
+ * Chặn dưới 30 ngày cùng lý do với sanitize_stale_days().
+ *
+ * @param mixed $value
+ * @return int
+ */
+function init_plugin_suite_reading_position_sanitize_inactive_days( $value ) {
+    return max( 30, absint( $value ) );
 }
