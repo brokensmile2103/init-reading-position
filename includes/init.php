@@ -1,5 +1,13 @@
 <?php
-if ( ! defined( 'ABSPATH' ) ) exit;
+/**
+ * Database schema, migration and core read/write helpers.
+ *
+ * @package InitReadingPosition
+ */
+
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
 
 // ==========================
 // Create / upgrade database
@@ -7,24 +15,31 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 
 register_activation_hook( INIT_PLUGIN_SUITE_RP_FILE, 'init_plugin_suite_reading_position_on_activation' );
 add_action( 'wpmu_new_blog', 'init_plugin_suite_reading_position_on_new_blog', 10, 6 );
-
-add_action( 'admin_init', function () {
-	$current_db_version = get_option( 'irp_plugin_db_version', '0.0.0' );
-	if ( version_compare( $current_db_version, INIT_PLUGIN_SUITE_RP_VERSION, '<' ) ) {
-		init_plugin_suite_reading_position_check_table();
-	}
-} );
+add_action( 'admin_init', 'init_plugin_suite_reading_position_maybe_upgrade' );
 
 // Tracks the one-time redundant-index cleanup (schema < 1.7 → 1.7). Bump only if a future
 // version needs another index migration to run again.
 define( 'INIT_PLUGIN_SUITE_RP_INDEX_MIGRATION_VERSION', 1 );
+
+// Số dòng tối đa xử lý trong 1 lượt SELECT + DELETE khi xóa hàng loạt theo post/user.
+define( 'INIT_PLUGIN_SUITE_RP_DELETE_BATCH', 1000 );
+
+/**
+ * So sánh phiên bản schema đã lưu với phiên bản plugin, chạy nâng cấp nếu cần (admin_init).
+ */
+function init_plugin_suite_reading_position_maybe_upgrade() {
+	$current_db_version = get_option( 'irp_plugin_db_version', '0.0.0' );
+	if ( version_compare( $current_db_version, INIT_PLUGIN_SUITE_RP_VERSION, '<' ) ) {
+		init_plugin_suite_reading_position_check_table();
+	}
+}
 
 /**
  * Activation hook – single site hoặc toàn multisite network.
  */
 function init_plugin_suite_reading_position_on_activation() {
 	if ( is_multisite() ) {
-		$sites = get_sites( [ 'number' => 0 ] );
+		$sites = get_sites( array( 'number' => 0 ) );
 		foreach ( $sites as $site ) {
 			switch_to_blog( $site->blog_id );
 			init_plugin_suite_reading_position_create_table();
@@ -39,26 +54,44 @@ function init_plugin_suite_reading_position_on_activation() {
 
 /**
  * Tạo bảng cho site mới trong multisite.
+ *
+ * @param int    $blog_id Site ID.
+ * @param int    $user_id User ID (unused).
+ * @param string $domain  Site domain (unused).
+ * @param string $path    Site path (unused).
+ * @param int    $site_id Network ID (unused).
+ * @param array  $meta    Site meta (unused).
  */
-function init_plugin_suite_reading_position_on_new_blog( $blog_id, $user_id, $domain, $path, $site_id, $meta ) {
+function init_plugin_suite_reading_position_on_new_blog( $blog_id, $user_id, $domain, $path, $site_id, $meta ) { // phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter.FoundAfterLastUsed
 	switch_to_blog( $blog_id );
 	init_plugin_suite_reading_position_create_table();
 	restore_current_blog();
 }
 
 /**
+ * Kiểm tra bảng có tồn tại chưa.
+ *
+ * Dùng prepare() + esc_like() vì `_` trong prefix bảng là ký tự đại diện của LIKE.
+ *
+ * @return bool
+ */
+function init_plugin_suite_reading_position_table_exists() {
+	global $wpdb;
+	$table = init_plugin_suite_reading_position_table();
+
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+	return $table === $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $table ) ) );
+}
+
+/**
  * Kiểm tra & tạo bảng nếu chưa tồn tại (admin_init).
  */
 function init_plugin_suite_reading_position_check_table() {
-	if ( ! current_user_can( 'administrator' ) ) {
+	if ( ! current_user_can( 'manage_options' ) ) {
 		return;
 	}
 
-	global $wpdb;
-	$table = $wpdb->prefix . 'init_rp_positions';
-
-	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter
-	if ( $wpdb->get_var( "SHOW TABLES LIKE '$table'" ) !== $table ) {
+	if ( ! init_plugin_suite_reading_position_table_exists() ) {
 		init_plugin_suite_reading_position_create_table();
 	}
 
@@ -83,21 +116,20 @@ function init_plugin_suite_reading_position_maybe_drop_redundant_index() {
 		return;
 	}
 
-	global $wpdb;
-	$table = init_plugin_suite_reading_position_table();
-
-	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter
-	if ( $wpdb->get_var( "SHOW TABLES LIKE '$table'" ) !== $table ) {
+	if ( ! init_plugin_suite_reading_position_table_exists() ) {
 		// Bảng chưa tồn tại (chưa qua activation) – không có gì để dọn, thử lại ở lần check_table() kế tiếp.
 		return;
 	}
 
+	global $wpdb;
+	$table = init_plugin_suite_reading_position_table();
+
 	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter
-	$index_exists = $wpdb->get_row( "SHOW INDEX FROM $table WHERE Key_name = 'user_id'" );
+	$index_exists = $wpdb->get_row( "SHOW INDEX FROM {$table} WHERE Key_name = 'user_id'" );
 
 	if ( $index_exists ) {
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter, WordPress.DB.DirectDatabaseQuery.SchemaChange
-		$wpdb->query( "ALTER TABLE $table DROP INDEX user_id" );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.DirectDatabaseQuery.SchemaChange, PluginCheck.Security.DirectDB.UnescapedDBParameter
+		$wpdb->query( "ALTER TABLE {$table} DROP INDEX user_id" );
 	}
 
 	update_option( 'irp_index_migration_done', INIT_PLUGIN_SUITE_RP_INDEX_MIGRATION_VERSION, false );
@@ -142,7 +174,7 @@ function init_plugin_suite_reading_position_create_table() {
 		percent TINYINT UNSIGNED NOT NULL DEFAULT 0,
 		screen_height INT UNSIGNED NOT NULL DEFAULT 0,
 		updated_at DATETIME NOT NULL,
-		PRIMARY KEY (id),
+		PRIMARY KEY  (id),
 		UNIQUE KEY user_post_device (user_id, post_id, device),
 		KEY post_id (post_id)
 	) $charset_collate;";
@@ -157,6 +189,24 @@ function init_plugin_suite_reading_position_create_table() {
 define( 'INIT_PLUGIN_SUITE_RP_MIGRATION_VERSION', 2 );
 
 /**
+ * Pattern LIKE (đã esc_like) cho các meta key cũ cần migrate.
+ *
+ * Phải escape vì `_` là ký tự đại diện của LIKE: pattern thô `_init_rp_%` vừa
+ * khớp nhầm meta key của plugin khác (rồi bị xóa như meta rác), vừa khiến MySQL
+ * không dùng được index `meta_key` → quét toàn bảng usermeta mỗi batch.
+ *
+ * @return string[]
+ */
+function init_plugin_suite_reading_position_meta_like_patterns() {
+	global $wpdb;
+
+	return array(
+		$wpdb->esc_like( '_init_plugin_suite_reading_position_' ) . '%', // Canonical.
+		$wpdb->esc_like( '_init_rp_' ) . '%',                            // Legacy.
+	);
+}
+
+/**
  * Migrate reading positions từ user_meta sang custom table.
  *
  * Meta key pattern (canonical):
@@ -166,6 +216,8 @@ define( 'INIT_PLUGIN_SUITE_RP_MIGRATION_VERSION', 2 );
  *   _init_rp_{post_id}_{device}
  *
  * Chạy theo batch 200 user/lần (idempotent – xóa meta sau khi migrate xong).
+ *
+ * @return bool True nếu vẫn còn dữ liệu cần migrate ở batch sau.
  */
 function init_plugin_suite_reading_position_maybe_migrate() {
 	$done = (int) get_option( 'irp_migration_done', 0 );
@@ -173,32 +225,24 @@ function init_plugin_suite_reading_position_maybe_migrate() {
 		return false;
 	}
 
-	global $wpdb;
-	$table = $wpdb->prefix . 'init_rp_positions';
-
-	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter
-	if ( $wpdb->get_var( "SHOW TABLES LIKE '$table'" ) !== $table ) {
+	if ( ! init_plugin_suite_reading_position_table_exists() ) {
 		return false;
 	}
 
-	$meta_patterns = [
-		'_init_plugin_suite_reading_position_%', // canonical
-		'_init_rp_%',                            // legacy
-	];
+	global $wpdb;
+	$meta_patterns = init_plugin_suite_reading_position_meta_like_patterns();
 
-	// Lấy 200 user đầu tiên còn meta (không dùng OFFSET vì meta bị delete sau khi xử lý)
-	$conditions = implode( ' OR ', array_fill( 0, count( $meta_patterns ), 'meta_key LIKE %s' ) );
+	// Lấy 200 user đầu tiên còn meta (không dùng OFFSET vì meta bị delete sau khi xử lý).
 	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
 	$user_ids = $wpdb->get_col(
-		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare
 		$wpdb->prepare(
 			"SELECT DISTINCT user_id FROM {$wpdb->usermeta}
-			 WHERE ( $conditions )
+			 WHERE ( meta_key LIKE %s OR meta_key LIKE %s )
 			 ORDER BY user_id ASC
 			 LIMIT 200",
-			...$meta_patterns
+			$meta_patterns[0],
+			$meta_patterns[1]
 		)
-		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare
 	);
 
 	if ( empty( $user_ids ) ) {
@@ -207,22 +251,22 @@ function init_plugin_suite_reading_position_maybe_migrate() {
 	}
 
 	foreach ( $user_ids as $user_id ) {
-		$user_id = (int) $user_id;
-		init_plugin_suite_reading_position_migrate_user( $user_id );
+		init_plugin_suite_reading_position_migrate_user( (int) $user_id );
 	}
 
-	// Kiểm tra còn sót meta không
-	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-	$remaining = (int) $wpdb->get_var(
-		// phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
+	// Chỉ cần biết còn sót ÍT NHẤT 1 dòng hay không – không cần COUNT(DISTINCT) cả bảng.
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+	$has_remaining = $wpdb->get_var(
 		$wpdb->prepare(
-			"SELECT COUNT(DISTINCT user_id) FROM {$wpdb->usermeta}
-			 WHERE ( meta_key LIKE %s OR meta_key LIKE %s )",
-			...$meta_patterns
+			"SELECT 1 FROM {$wpdb->usermeta}
+			 WHERE ( meta_key LIKE %s OR meta_key LIKE %s )
+			 LIMIT 1",
+			$meta_patterns[0],
+			$meta_patterns[1]
 		)
 	);
 
-	if ( $remaining === 0 ) {
+	if ( null === $has_remaining ) {
 		update_option( 'irp_migration_done', INIT_PLUGIN_SUITE_RP_MIGRATION_VERSION, false );
 		return false;
 	}
@@ -250,12 +294,13 @@ function init_plugin_suite_reading_position_migration_is_done() {
 /**
  * Migrate tất cả reading position meta của 1 user vào DB.
  *
- * @param int $user_id
+ * @param int $user_id User ID.
  */
 function init_plugin_suite_reading_position_migrate_user( $user_id ) {
 	global $wpdb;
+	$meta_patterns = init_plugin_suite_reading_position_meta_like_patterns();
 
-	// Lấy tất cả meta key khớp pattern của user này
+	// Lấy tất cả meta key khớp pattern của user này.
 	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
 	$rows = $wpdb->get_results(
 		$wpdb->prepare(
@@ -263,8 +308,8 @@ function init_plugin_suite_reading_position_migrate_user( $user_id ) {
 			 WHERE user_id = %d
 			   AND ( meta_key LIKE %s OR meta_key LIKE %s )",
 			$user_id,
-			'_init_plugin_suite_reading_position_%',
-			'_init_rp_%'
+			$meta_patterns[0],
+			$meta_patterns[1]
 		),
 		ARRAY_A
 	);
@@ -278,24 +323,24 @@ function init_plugin_suite_reading_position_migrate_user( $user_id ) {
 		$meta_value = maybe_unserialize( $row['meta_value'] );
 
 		if ( ! is_array( $meta_value ) ) {
-			// Meta rác – xóa luôn
+			// Meta rác – xóa luôn.
 			delete_user_meta( $user_id, $meta_key );
 			continue;
 		}
 
-		// Parse post_id + device từ meta key
-		// Canonical: _init_plugin_suite_reading_position_{post_id}_{device}
-		// Legacy:    _init_rp_{post_id}_{device}
+		// Parse post_id + device từ meta key.
+		// Canonical: _init_plugin_suite_reading_position_{post_id}_{device}.
+		// Legacy:    _init_rp_{post_id}_{device}.
 		$parsed = init_plugin_suite_reading_position_parse_meta_key( $meta_key );
 		if ( ! $parsed ) {
 			delete_user_meta( $user_id, $meta_key );
 			continue;
 		}
 
-		[ 'post_id' => $post_id, 'device' => $device ] = $parsed;
-
-		$scroll_top    = max( 0, (int) ( $meta_value['scrollTop']    ?? 0 ) );
-		$percent       = min( 100, max( 0, (int) ( $meta_value['percent']       ?? 0 ) ) );
+		$post_id       = $parsed['post_id'];
+		$device        = $parsed['device'];
+		$scroll_top    = max( 0, (int) ( $meta_value['scrollTop'] ?? 0 ) );
+		$percent       = min( 100, max( 0, (int) ( $meta_value['percent'] ?? 0 ) ) );
 		$screen_height = max( 0, (int) ( $meta_value['screenHeight'] ?? 0 ) );
 		$updated_at    = sanitize_text_field( $meta_value['updated'] ?? current_time( 'mysql', true ) );
 
@@ -320,24 +365,24 @@ function init_plugin_suite_reading_position_migrate_user( $user_id ) {
 /**
  * Parse post_id và device từ meta key.
  *
- * @param string $meta_key
+ * @param string $meta_key Meta key.
  * @return array|null  [ 'post_id' => int, 'device' => string ] hoặc null nếu không match.
  */
 function init_plugin_suite_reading_position_parse_meta_key( $meta_key ) {
-	// Canonical pattern
+	// Canonical pattern.
 	if ( preg_match( '/^_init_plugin_suite_reading_position_(\d+)_(.+)$/', $meta_key, $m ) ) {
-		return [
+		return array(
 			'post_id' => (int) $m[1],
 			'device'  => sanitize_key( $m[2] ),
-		];
+		);
 	}
 
-	// Legacy pattern
+	// Legacy pattern.
 	if ( preg_match( '/^_init_rp_(\d+)_(.+)$/', $meta_key, $m ) ) {
-		return [
+		return array(
 			'post_id' => (int) $m[1],
 			'device'  => sanitize_key( $m[2] ),
-		];
+		);
 	}
 
 	return null;
@@ -360,28 +405,28 @@ function init_plugin_suite_reading_position_table() {
 /**
  * Upsert (INSERT … ON DUPLICATE KEY UPDATE) một reading position.
  *
- * @param int    $user_id
- * @param int    $post_id
- * @param string $device
- * @param int    $scroll_top
- * @param int    $percent
- * @param int    $screen_height
- * @param string $updated_at   MySQL datetime UTC.
+ * @param int    $user_id       User ID.
+ * @param int    $post_id       Post ID.
+ * @param string $device        Device key.
+ * @param int    $scroll_top    Scroll offset (px).
+ * @param int    $percent       Progress (0-100).
+ * @param int    $screen_height Viewport height (px).
+ * @param string $updated_at    MySQL datetime UTC.
  * @return bool
  */
 function init_plugin_suite_reading_position_upsert( $user_id, $post_id, $device, $scroll_top, $percent, $screen_height, $updated_at = '' ) {
 	global $wpdb;
 	$table = init_plugin_suite_reading_position_table();
 
-	if ( $updated_at === '' ) {
+	if ( '' === $updated_at ) {
 		$updated_at = current_time( 'mysql', true );
 	}
 
+	// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, PluginCheck.Security.DirectDB.UnescapedDBParameter
 	$result = $wpdb->query(
-		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 		$wpdb->prepare(
-			"INSERT INTO $table (user_id, post_id, device, scroll_top, percent, screen_height, updated_at)
+			"INSERT INTO {$table} (user_id, post_id, device, scroll_top, percent, screen_height, updated_at)
 			 VALUES (%d, %d, %s, %d, %d, %d, %s)
 			 ON DUPLICATE KEY UPDATE
 			   scroll_top    = VALUES(scroll_top),
@@ -396,10 +441,10 @@ function init_plugin_suite_reading_position_upsert( $user_id, $post_id, $device,
 			$screen_height,
 			$updated_at
 		)
-		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 	);
+	// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 
-	if ( $result === false ) {
+	if ( false === $result ) {
 		return false;
 	}
 
@@ -410,89 +455,49 @@ function init_plugin_suite_reading_position_upsert( $user_id, $post_id, $device,
 /**
  * Lấy reading position của 1 (user, post, device) từ DB.
  *
- * @param int    $user_id
- * @param int    $post_id
- * @param string $device
+ * Truyền mảng device để lấy nhiều device trong 1 query (bulk mode), kết quả
+ * trả về dạng [ device => row|null ] theo đúng thứ tự device yêu cầu.
+ *
+ * @param int          $user_id User ID.
+ * @param int          $post_id Post ID.
+ * @param string|array $device  Device key hoặc danh sách device key.
  * @return array|null  Row dạng legacy hoặc null nếu không có.
  */
 function init_plugin_suite_reading_position_get( $user_id, $post_id, $device = 'pc' ) {
 	$user_id = (int) $user_id;
 	$post_id = (int) $post_id;
 
+	if ( is_array( $device ) ) {
+		return init_plugin_suite_reading_position_get_bulk( $user_id, $post_id, $device );
+	}
+
 	global $wpdb;
 	$table = init_plugin_suite_reading_position_table();
 
-	// ==========================
-	// BULK MODE (multi-device)
-	// ==========================
-	if ( is_array( $device ) ) {
-		$devices = array_map( 'sanitize_key', $device );
-
-		if ( empty( $devices ) ) {
-			return [];
-		}
-
-		$cache_key = init_plugin_suite_reading_position_bulk_cache_key( $user_id, $post_id );
-		$group     = init_plugin_suite_reading_position_cache_group();
-
-		$cached = wp_cache_get( $cache_key, $group );
-		if ( false !== $cached ) {
-			return $cached;
-		}
-
-		$placeholders = implode( ',', array_fill( 0, count( $devices ), '%s' ) );
-
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, PluginCheck.Security.DirectDB.UnescapedDBParameter
-		$rows = $wpdb->get_results(
-			// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-			// phpcs:ignore WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
-			$wpdb->prepare(
-				"SELECT * FROM {$table} WHERE user_id = %d AND post_id = %d AND device IN ($placeholders)",
-				array_merge( [ $user_id, $post_id ], $devices )
-			),
-			ARRAY_A
-			// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-		);
-
-		$result = array_fill_keys( $devices, null );
-
-		if ( $rows ) {
-			foreach ( $rows as $row ) {
-				$d = $row['device'];
-				$result[ $d ] = init_plugin_suite_reading_position_row_to_legacy( $row );
-			}
-		}
-
-		wp_cache_set( $cache_key, $result, $group, init_plugin_suite_reading_position_cache_ttl() );
-
-		return $result;
-	}
-
-	// ==========================
-	// SINGLE MODE
-	// ==========================
-	$device = sanitize_key( $device );
-
+	$device    = sanitize_key( $device );
 	$cache_key = init_plugin_suite_reading_position_cache_key( $user_id, $post_id, $device );
 	$group     = init_plugin_suite_reading_position_cache_group();
 
 	$cached = wp_cache_get( $cache_key, $group );
 	if ( false !== $cached ) {
-		return $cached ?: null;
+		return is_array( $cached ) ? $cached : null;
 	}
 
+	// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, PluginCheck.Security.DirectDB.UnescapedDBParameter
 	$row = $wpdb->get_row(
-		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 		$wpdb->prepare(
-			"SELECT * FROM {$table} WHERE user_id = %d AND post_id = %d AND device = %s LIMIT 1",
+			"SELECT id, post_id, device, scroll_top, percent, screen_height, updated_at
+			 FROM {$table}
+			 WHERE user_id = %d AND post_id = %d AND device = %s
+			 LIMIT 1",
 			$user_id,
 			$post_id,
 			$device
 		),
 		ARRAY_A
-		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 	);
+	// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 
 	if ( $row ) {
 		$data = init_plugin_suite_reading_position_row_to_legacy( $row );
@@ -511,11 +516,114 @@ function init_plugin_suite_reading_position_get( $user_id, $post_id, $device = '
 }
 
 /**
+ * Bulk mode của init_plugin_suite_reading_position_get(): nhiều device trong 1 query.
+ *
+ * Cache bulk là 1 map [ device => row|null ] dùng chung cho mọi tổ hợp device:
+ * cache hit chỉ khi map đã có đủ các device được hỏi, device còn thiếu được
+ * query bổ sung rồi gộp vào map (trước đây key bulk cố định nhưng nội dung phụ
+ * thuộc danh sách device của lần gọi đầu → gọi với tổ hợp khác có thể nhận
+ * thiếu dữ liệu).
+ *
+ * Khi cache miss trên site có persistent object cache, các entry cache đơn lẻ
+ * (có thể là dữ liệu heartbeat cache-only mới hơn DB) được ưu tiên hơn row DB
+ * – tránh trường hợp cache bulk đã hết hạn trong lúc đọc dài khiến trang tải
+ * lại quay về vị trí cũ trong DB.
+ *
+ * @param int   $user_id User ID.
+ * @param int   $post_id Post ID.
+ * @param array $devices Danh sách device key.
+ * @return array
+ */
+function init_plugin_suite_reading_position_get_bulk( $user_id, $post_id, array $devices ) {
+	$devices = array_values( array_unique( array_map( 'sanitize_key', $devices ) ) );
+
+	if ( empty( $devices ) ) {
+		return array();
+	}
+
+	$cache_key = init_plugin_suite_reading_position_bulk_cache_key( $user_id, $post_id );
+	$group     = init_plugin_suite_reading_position_cache_group();
+
+	$cached = wp_cache_get( $cache_key, $group );
+	$cached = is_array( $cached ) ? $cached : array();
+
+	$missing = array();
+	foreach ( $devices as $d ) {
+		if ( ! array_key_exists( $d, $cached ) ) {
+			$missing[] = $d;
+		}
+	}
+
+	if ( ! empty( $missing ) ) {
+		global $wpdb;
+		$table        = init_plugin_suite_reading_position_table();
+		$placeholders = implode( ',', array_fill( 0, count( $missing ), '%s' ) );
+
+		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, PluginCheck.Security.DirectDB.UnescapedDBParameter
+		$rows = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT id, post_id, device, scroll_top, percent, screen_height, updated_at
+				 FROM {$table}
+				 WHERE user_id = %d AND post_id = %d AND device IN ($placeholders)",
+				array_merge( array( $user_id, $post_id ), $missing )
+			),
+			ARRAY_A
+		);
+		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
+
+		$fresh = array_fill_keys( $missing, null );
+
+		if ( $rows ) {
+			foreach ( $rows as $row ) {
+				if ( array_key_exists( $row['device'], $fresh ) ) {
+					$fresh[ $row['device'] ] = init_plugin_suite_reading_position_row_to_legacy( $row );
+				}
+			}
+		}
+
+		if ( wp_using_ext_object_cache() ) {
+			$single_keys = array();
+			foreach ( $missing as $d ) {
+				$single_keys[ $d ] = init_plugin_suite_reading_position_cache_key( $user_id, $post_id, $d );
+			}
+
+			$singles = init_plugin_suite_reading_position_cache_get_multiple( array_values( $single_keys ), $group );
+
+			foreach ( $single_keys as $d => $key ) {
+				if ( isset( $singles[ $key ] ) && is_array( $singles[ $key ] ) ) {
+					$fresh[ $d ] = $singles[ $key ];
+				}
+			}
+		}
+
+		if ( ! init_plugin_suite_reading_position_migration_is_done() ) {
+			foreach ( $fresh as $d => $value ) {
+				if ( null === $value ) {
+					$fresh[ $d ] = init_plugin_suite_reading_position_get_meta_fallback( $user_id, $post_id, $d );
+				}
+			}
+		}
+
+		// Union (+) thay vì array_merge() để không đánh số lại key dạng số.
+		$cached = $fresh + $cached;
+		wp_cache_set( $cache_key, $cached, $group, init_plugin_suite_reading_position_cache_ttl() );
+	}
+
+	$result = array();
+	foreach ( $devices as $d ) {
+		$result[ $d ] = $cached[ $d ];
+	}
+
+	return $result;
+}
+
+/**
  * Xóa reading position của 1 (user, post, device).
  *
- * @param int    $user_id
- * @param int    $post_id
- * @param string $device
+ * @param int    $user_id User ID.
+ * @param int    $post_id Post ID.
+ * @param string $device  Device key.
  * @return bool
  */
 function init_plugin_suite_reading_position_delete( $user_id, $post_id, $device ) {
@@ -525,68 +633,122 @@ function init_plugin_suite_reading_position_delete( $user_id, $post_id, $device 
 	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
 	$deleted = $wpdb->delete(
 		$table,
-		[
+		array(
 			'user_id' => (int) $user_id,
 			'post_id' => (int) $post_id,
 			'device'  => sanitize_key( $device ),
-		],
-		[ '%d', '%d', '%s' ]
+		),
+		array( '%d', '%d', '%s' )
 	);
 
-	// Xóa meta cũ (back-compat) phòng khi migration chưa chạy hết
-	$canonical = "_init_plugin_suite_reading_position_{$post_id}_{$device}";
-	$legacy    = "_init_rp_{$post_id}_{$device}";
-	delete_user_meta( $user_id, $canonical );
-	if ( $legacy !== $canonical ) {
-		delete_user_meta( $user_id, $legacy );
+	// Xóa meta cũ (back-compat) phòng khi migration chưa chạy hết. Sau khi migration
+	// đã xác nhận xong thì không còn meta nào để xóa – bỏ qua 2 query thừa.
+	if ( ! init_plugin_suite_reading_position_migration_is_done() ) {
+		$canonical = "_init_plugin_suite_reading_position_{$post_id}_{$device}";
+		$legacy    = "_init_rp_{$post_id}_{$device}";
+		delete_user_meta( $user_id, $canonical );
+		if ( $legacy !== $canonical ) {
+			delete_user_meta( $user_id, $legacy );
+		}
 	}
 
 	init_plugin_suite_reading_position_invalidate_cache( $user_id, $post_id, $device );
 
-	return $deleted !== false;
+	return false !== $deleted;
+}
+
+/**
+ * Xóa hàng loạt reading position theo 1 cột (post_id hoặc user_id), chia batch.
+ *
+ * Mỗi lượt chỉ SELECT tối đa INIT_PLUGIN_SUITE_RP_DELETE_BATCH dòng rồi DELETE
+ * theo PRIMARY KEY – bài viết/tài khoản có hàng trăm nghìn dòng không còn nạp
+ * toàn bộ vào bộ nhớ PHP cùng lúc, cũng không giữ lock 1 câu DELETE khổng lồ.
+ * Cache của từng dòng bị xóa được invalidate ngay sau DELETE của batch đó.
+ *
+ * @param string $column 'post_id' hoặc 'user_id'.
+ * @param int    $value  Giá trị cần xóa.
+ * @return int Số dòng đã xóa.
+ */
+function init_plugin_suite_reading_position_delete_where( $column, $value ) {
+	if ( ! in_array( $column, array( 'post_id', 'user_id' ), true ) ) {
+		return 0;
+	}
+
+	$value = (int) $value;
+	if ( $value <= 0 ) {
+		return 0;
+	}
+
+	global $wpdb;
+	$table = init_plugin_suite_reading_position_table();
+	$batch = INIT_PLUGIN_SUITE_RP_DELETE_BATCH;
+	$total = 0;
+
+	do {
+		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, PluginCheck.Security.DirectDB.UnescapedDBParameter
+		$rows = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT id, user_id, post_id, device FROM {$table} WHERE {$column} = %d LIMIT %d",
+				$value,
+				$batch
+			),
+			ARRAY_A
+		);
+		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+
+		$fetched = is_array( $rows ) ? count( $rows ) : 0;
+		if ( 0 === $fetched ) {
+			break;
+		}
+
+		$ids     = array_map( 'intval', wp_list_pluck( $rows, 'id' ) );
+		$deleted = init_plugin_suite_reading_position_delete_ids( $ids );
+
+		if ( ! $deleted ) {
+			// Lỗi DB hoặc không xóa được dòng nào – dừng để tránh lặp vô hạn.
+			break;
+		}
+
+		$total += $deleted;
+		init_plugin_suite_reading_position_invalidate_cache_many( $rows );
+	} while ( $fetched === $batch );
+
+	return $total;
+}
+
+/**
+ * DELETE theo danh sách PRIMARY KEY.
+ *
+ * @param int[] $ids Row IDs.
+ * @return int Số dòng đã xóa (0 nếu lỗi).
+ */
+function init_plugin_suite_reading_position_delete_ids( array $ids ) {
+	if ( empty( $ids ) ) {
+		return 0;
+	}
+
+	global $wpdb;
+	$table        = init_plugin_suite_reading_position_table();
+	$placeholders = implode( ',', array_fill( 0, count( $ids ), '%d' ) );
+
+	// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare
+	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, PluginCheck.Security.DirectDB.UnescapedDBParameter
+	$deleted = $wpdb->query( $wpdb->prepare( "DELETE FROM {$table} WHERE id IN ($placeholders)", $ids ) );
+	// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare
+
+	return (int) $deleted;
 }
 
 /**
  * Xóa toàn bộ reading position của 1 bài viết – dọn dữ liệu mồ côi khi bài
  * viết bị xóa vĩnh viễn (post_id không còn trỏ tới nội dung nào cả).
  *
- * Lấy trước danh sách (user_id, device) liên quan NGAY BÂY GIỜ vì sau khi
- * DELETE thì không còn cách nào tra lại được nữa – cùng pattern với
- * init_plugin_suite_reading_position_delete_by_user() bên dưới.
- *
- * @param int $post_id
+ * @param int $post_id Post ID.
  * @return int Số dòng đã xóa.
  */
 function init_plugin_suite_reading_position_delete_by_post( $post_id ) {
-	$post_id = (int) $post_id;
-	if ( $post_id <= 0 ) {
-		return 0;
-	}
-
-	global $wpdb;
-	$table = init_plugin_suite_reading_position_table();
-
-	// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, PluginCheck.Security.DirectDB.UnescapedDBParameter
-	$affected = $wpdb->get_results(
-		$wpdb->prepare(
-			"SELECT user_id, device FROM {$table} WHERE post_id = %d",
-			$post_id
-		),
-		ARRAY_A
-	);
-	// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-
-	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
-	$deleted = $wpdb->delete( $table, [ 'post_id' => $post_id ], [ '%d' ] );
-
-	if ( ! empty( $affected ) ) {
-		foreach ( $affected as $row ) {
-			init_plugin_suite_reading_position_invalidate_cache( (int) $row['user_id'], $post_id, $row['device'] );
-		}
-	}
-
-	return (int) $deleted;
+	return init_plugin_suite_reading_position_delete_where( 'post_id', $post_id );
 }
 add_action( 'before_delete_post', 'init_plugin_suite_reading_position_delete_by_post' );
 
@@ -594,67 +756,39 @@ add_action( 'before_delete_post', 'init_plugin_suite_reading_position_delete_by_
  * Xóa toàn bộ reading position của 1 user – dọn dữ liệu mồ côi khi tài
  * khoản bị xóa vĩnh viễn (user_id không còn trỏ tới tài khoản nào cả).
  *
- * @param int $user_id
+ * @param int $user_id User ID.
  * @return int Số dòng đã xóa.
  */
 function init_plugin_suite_reading_position_delete_by_user( $user_id ) {
-	$user_id = (int) $user_id;
-	if ( $user_id <= 0 ) {
-		return 0;
-	}
-
-	global $wpdb;
-	$table = init_plugin_suite_reading_position_table();
-
-	// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, PluginCheck.Security.DirectDB.UnescapedDBParameter
-	$affected = $wpdb->get_results(
-		$wpdb->prepare(
-			"SELECT post_id, device FROM {$table} WHERE user_id = %d",
-			$user_id
-		),
-		ARRAY_A
-	);
-	// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-
-	// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
-	$deleted = $wpdb->delete( $table, [ 'user_id' => $user_id ], [ '%d' ] );
-
-	if ( ! empty( $affected ) ) {
-		foreach ( $affected as $row ) {
-			init_plugin_suite_reading_position_invalidate_cache( $user_id, (int) $row['post_id'], $row['device'] );
-		}
-	}
-
-	return (int) $deleted;
+	return init_plugin_suite_reading_position_delete_where( 'user_id', $user_id );
 }
 add_action( 'deleted_user', 'init_plugin_suite_reading_position_delete_by_user' );
 
 /**
  * Chuyển 1 DB row sang format legacy (tương thích với code cũ đọc meta).
  *
- * @param array $row
+ * @param array $row DB row.
  * @return array
  */
 function init_plugin_suite_reading_position_row_to_legacy( array $row ) {
-	return [
+	return array(
 		'scrollTop'    => (int) $row['scroll_top'],
 		'percent'      => (int) $row['percent'],
 		'screenHeight' => (int) $row['screen_height'],
 		'updated'      => $row['updated_at'],
 		'postId'       => (int) $row['post_id'],
 		'device'       => $row['device'],
-		// internal
+		// Internal.
 		'_id'          => (int) $row['id'],
-	];
+	);
 }
 
 /**
  * Fallback: đọc meta cũ khi row DB chưa tồn tại.
  *
- * @param int    $user_id
- * @param int    $post_id
- * @param string $device
+ * @param int    $user_id User ID.
+ * @param int    $post_id Post ID.
+ * @param string $device  Device key.
  * @return array|null
  */
 function init_plugin_suite_reading_position_get_meta_fallback( $user_id, $post_id, $device ) {
@@ -675,33 +809,117 @@ function init_plugin_suite_reading_position_get_meta_fallback( $user_id, $post_i
 // Cache helpers
 // ==========================
 
+/**
+ * Object cache group.
+ *
+ * @return string
+ */
 function init_plugin_suite_reading_position_cache_group() {
 	return 'irp_positions';
 }
 
+/**
+ * Object cache TTL (seconds).
+ *
+ * @return int
+ */
 function init_plugin_suite_reading_position_cache_ttl() {
 	return 10 * MINUTE_IN_SECONDS;
 }
 
 /**
  * Cache key cho 1 (user, post, device).
+ *
+ * @param int    $user_id User ID.
+ * @param int    $post_id Post ID.
+ * @param string $device  Device key.
+ * @return string
  */
 function init_plugin_suite_reading_position_cache_key( $user_id, $post_id, $device ) {
 	return 'pos_' . (int) $user_id . '_' . (int) $post_id . '_' . sanitize_key( $device );
 }
 
+/**
+ * Cache key cho map nhiều device của 1 (user, post).
+ *
+ * @param int $user_id User ID.
+ * @param int $post_id Post ID.
+ * @return string
+ */
 function init_plugin_suite_reading_position_bulk_cache_key( $user_id, $post_id ) {
-    return 'pos_bulk_' . (int) $user_id . '_' . (int) $post_id . '_pc_mobile_tablet';
+	return 'pos_bulk_' . (int) $user_id . '_' . (int) $post_id . '_pc_mobile_tablet';
+}
+
+/**
+ * Đọc nhiều cache key trong 1 lượt (1 round-trip với Redis/Memcached).
+ *
+ * Tự fallback khi object-cache drop-in cũ không định nghĩa wp_cache_get_multiple()
+ * (WP < 6.1 không có lớp tương thích cho drop-in).
+ *
+ * @param string[] $keys  Cache keys.
+ * @param string   $group Cache group.
+ * @return array [ key => value|false ]
+ */
+function init_plugin_suite_reading_position_cache_get_multiple( array $keys, $group ) {
+	if ( function_exists( 'wp_cache_get_multiple' ) ) {
+		return wp_cache_get_multiple( $keys, $group );
+	}
+
+	$values = array();
+	foreach ( $keys as $key ) {
+		$values[ $key ] = wp_cache_get( $key, $group );
+	}
+	return $values;
 }
 
 /**
  * Xóa cache khi có thay đổi.
+ *
+ * @param int    $user_id User ID.
+ * @param int    $post_id Post ID.
+ * @param string $device  Device key.
  */
 function init_plugin_suite_reading_position_invalidate_cache( $user_id, $post_id, $device ) {
 	$group = init_plugin_suite_reading_position_cache_group();
 
-	wp_cache_delete(init_plugin_suite_reading_position_cache_key( $user_id, $post_id, $device ), $group);
-	wp_cache_delete(init_plugin_suite_reading_position_bulk_cache_key( $user_id, $post_id ), $group);
+	wp_cache_delete( init_plugin_suite_reading_position_cache_key( $user_id, $post_id, $device ), $group );
+	wp_cache_delete( init_plugin_suite_reading_position_bulk_cache_key( $user_id, $post_id ), $group );
+}
+
+/**
+ * Xóa cache cho nhiều dòng cùng lúc (dùng khi xóa hàng loạt).
+ *
+ * Gộp key trùng (nhiều device cùng chung 1 key bulk) và dùng
+ * wp_cache_delete_multiple() khi có để giảm round-trip tới Redis/Memcached.
+ *
+ * @param array $rows Mỗi phần tử có user_id, post_id, device.
+ */
+function init_plugin_suite_reading_position_invalidate_cache_many( array $rows ) {
+	if ( empty( $rows ) ) {
+		return;
+	}
+
+	$group = init_plugin_suite_reading_position_cache_group();
+	$keys  = array();
+
+	foreach ( $rows as $row ) {
+		$user_id = (int) $row['user_id'];
+		$post_id = (int) $row['post_id'];
+
+		$keys[ init_plugin_suite_reading_position_cache_key( $user_id, $post_id, $row['device'] ) ] = true;
+		$keys[ init_plugin_suite_reading_position_bulk_cache_key( $user_id, $post_id ) ]            = true;
+	}
+
+	$keys = array_keys( $keys );
+
+	if ( function_exists( 'wp_cache_delete_multiple' ) ) {
+		wp_cache_delete_multiple( $keys, $group );
+		return;
+	}
+
+	foreach ( $keys as $key ) {
+		wp_cache_delete( $key, $group );
+	}
 }
 
 /**
@@ -728,16 +946,16 @@ function init_plugin_suite_reading_position_invalidate_cache( $user_id, $post_id
  * hoàn toàn. Caller (rest-api.php) tự kiểm tra wp_using_ext_object_cache()
  * trước khi gọi.
  *
- * @param int    $user_id
- * @param int    $post_id
- * @param string $device
- * @param int    $scroll_top
- * @param int    $percent
- * @param int    $screen_height
- * @param string $updated_at
+ * @param int    $user_id       User ID.
+ * @param int    $post_id       Post ID.
+ * @param string $device        Device key.
+ * @param int    $scroll_top    Scroll offset (px).
+ * @param int    $percent       Progress (0-100).
+ * @param int    $screen_height Viewport height (px).
+ * @param string $updated_at    MySQL datetime UTC.
  */
 function init_plugin_suite_reading_position_cache_only_update( $user_id, $post_id, $device, $scroll_top, $percent, $screen_height, $updated_at ) {
-	$data = [
+	$data = array(
 		'scrollTop'    => (int) $scroll_top,
 		'percent'      => (int) $percent,
 		'screenHeight' => (int) $screen_height,
@@ -746,7 +964,7 @@ function init_plugin_suite_reading_position_cache_only_update( $user_id, $post_i
 		'device'       => sanitize_key( $device ),
 		// Chưa có row DB thật cho bản ghi cache-only này tại thời điểm này.
 		'_id'          => 0,
-	];
+	);
 
 	$group = init_plugin_suite_reading_position_cache_group();
 	$ttl   = init_plugin_suite_reading_position_cache_ttl();
@@ -754,7 +972,8 @@ function init_plugin_suite_reading_position_cache_only_update( $user_id, $post_i
 	wp_cache_set( init_plugin_suite_reading_position_cache_key( $user_id, $post_id, $device ), $data, $group, $ttl );
 
 	// Đồng bộ luôn bulk cache (dùng khi localize cả 3 device một lần) để
-	// tránh đọc trúng giá trị cũ từ DB nếu bulk cache đang có sẵn.
+	// tránh đọc trúng giá trị cũ từ DB nếu bulk cache đang có sẵn. Nếu bulk
+	// cache chưa có, lần đọc bulk kế tiếp tự ưu tiên entry đơn lẻ ở trên.
 	$bulk_key = init_plugin_suite_reading_position_bulk_cache_key( $user_id, $post_id );
 	$bulk     = wp_cache_get( $bulk_key, $group );
 	if ( is_array( $bulk ) ) {
@@ -769,18 +988,24 @@ function init_plugin_suite_reading_position_cache_only_update( $user_id, $post_i
 
 add_action( 'upgrader_process_complete', 'init_plugin_suite_reading_position_on_update', 10, 2 );
 
-function init_plugin_suite_reading_position_on_update( $upgrader_object, $options ) {
+/**
+ * Chạy lại kiểm tra schema + lên lịch migration ngay sau khi plugin được cập nhật.
+ *
+ * @param WP_Upgrader $upgrader_object Upgrader instance (unused).
+ * @param array       $options         Update details.
+ */
+function init_plugin_suite_reading_position_on_update( $upgrader_object, $options ) { // phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter.FoundBeforeLastUsed
 	if (
 		isset( $options['action'], $options['type'] ) &&
-		$options['action'] === 'update' &&
-		$options['type'] === 'plugin' &&
+		'update' === $options['action'] &&
+		'plugin' === $options['type'] &&
 		! empty( $options['plugins'] )
 	) {
-		foreach ( $options['plugins'] as $plugin_path ) {
-			if ( $plugin_path === plugin_basename( INIT_PLUGIN_SUITE_RP_FILE ) ) {
+		foreach ( (array) $options['plugins'] as $plugin_path ) {
+			if ( plugin_basename( INIT_PLUGIN_SUITE_RP_FILE ) === $plugin_path ) {
 				init_plugin_suite_reading_position_check_table();
 
-				// reset + schedule lại luôn cho chắc
+				// Reset + schedule lại luôn cho chắc.
 				wp_clear_scheduled_hook( 'init_plugin_suite_reading_position_migration_event' );
 				wp_schedule_single_event( time() + 30, 'init_plugin_suite_reading_position_migration_event' );
 

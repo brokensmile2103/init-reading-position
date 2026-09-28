@@ -4,7 +4,7 @@ Tags: scroll, reading, reading progress, resume reading, reading position
 Requires at least: 5.5
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.9
+Stable tag: 1.10
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -70,6 +70,22 @@ Both run in small background batches (via WP-Cron) so they never lock up the dat
 1. Simple settings page — choose post types and optionally enter a CSS selector (e.g. `.entry-content`) to limit where reading progress is tracked.
 
 == Changelog ==
+
+= 1.10 – September 28, 2026 =
+- Fixed: The one-time user-meta migration used unescaped `LIKE` patterns — `_` is a SQL wildcard, so meta keys belonging to other plugins (e.g. `xinit_rp_settings`) could match and be deleted as junk. Patterns are now escaped with `$wpdb->esc_like()`, which also lets MySQL use the `meta_key` index instead of scanning the whole usermeta table on every batch
+- Fixed: Permanently deleting a post (or user) with a very large number of saved positions loaded every affected row into PHP memory at once (166 MB for 300,000 rows in testing), which could exceed the memory limit mid-deletion. Rows are now removed in bounded batches of 1,000 (about 1 MB regardless of size); the "inactive accounts" cleanup uses the same batched path
+- Fixed: Bulk reads could return incomplete data when the same post was first requested for a subset of devices; the shared per-post cache now fills in missing devices instead of trusting whatever was cached first
+- Fixed: On sites with a persistent object cache, a heartbeat saved only to cache could be lost on reload if the per-post cache had expired during a long reading session; the newer cached position now takes priority over the older database row
+- Fixed: Readers lingering near the end of a post sent a new "clear position" request on every scroll pause; it is now sent once until new progress is saved
+- Fixed: The frontend script stopped entirely when `localStorage` was unavailable (blocked storage, some private-browsing modes), and never started when loaded after `DOMContentLoaded` (e.g. by "delay JavaScript" optimization plugins)
+- Fixed: The settings page showed "Posts" as enabled after all post types had been unchecked, while the frontend correctly treated it as disabled
+- Fixed: Enabling a cleanup option for the very first time now starts the job immediately, as it already did on later changes
+- Fixed: The "abandoned progress" cleanup now clears cached positions after deleting rows rather than before, closing a window where a deleted position could be re-cached
+- Fixed: Uninstall now also removes the internal `irp_index_migration_done` option
+- Improved: Deleting a single saved position no longer runs legacy user-meta cleanup queries once migration is complete
+- Improved: Database reads select only the columns they use; the migration completion check uses `LIMIT 1` instead of counting every remaining row
+- Improved: Codebase follows the WordPress Coding Standards
+- No breaking changes — hooks, filters, REST API, database schema, cache keys, and localStorage keys are unchanged
 
 = 1.9 – September 10, 2026 =
 - Added: Reading positions are now automatically deleted when their post or their user account is permanently deleted — previously these rows were left behind indefinitely, silently pointing at content or accounts that no longer exist

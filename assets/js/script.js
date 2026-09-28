@@ -1,4 +1,5 @@
-document.addEventListener('DOMContentLoaded', function () {
+(function () {
+function initReadingPosition() {
     if (typeof InitRPData === 'undefined' || !InitRPData.postId) return;
 
     const postId         = InitRPData.postId;
@@ -11,6 +12,19 @@ document.addEventListener('DOMContentLoaded', function () {
         'Content-Type': 'application/json',
         'X-WP-Nonce': InitRPData.nonce || ''
     };
+
+    // localStorage có thể ném lỗi (Safari private mode cũ, trình duyệt chặn
+    // cookie/storage, hết quota...) — bọc lại để lỗi storage không làm chết
+    // toàn bộ script (và cả phần đồng bộ server cho user đã đăng nhập).
+    function storageGet(key) {
+        try { return window.localStorage.getItem(key); } catch (e) { return null; }
+    }
+    function storageSet(key, value) {
+        try { window.localStorage.setItem(key, value); } catch (e) { /* ignore */ }
+    }
+    function storageRemove(key) {
+        try { window.localStorage.removeItem(key); } catch (e) { /* ignore */ }
+    }
 
     // Auto-clear at end of content area (from localized PHP; default ON)
     const autoClearOnEnd = !!InitRPData.autoClearOnEnd;
@@ -75,7 +89,7 @@ document.addEventListener('DOMContentLoaded', function () {
     if (savedPosition > 0) {
         window.scrollTo({ top: savedPosition, behavior: 'smooth' });
     } else {
-        const localPos = localStorage.getItem(storageKey);
+        const localPos = storageGet(storageKey);
         if (localPos) {
             const y = parseInt(localPos, 10);
             if (!Number.isNaN(y) && y > 0) {
@@ -141,7 +155,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const HEARTBEAT_MS         = (InitRPData.heartbeatMs > 0) ? InitRPData.heartbeatMs : 30000;
     const MIN_SEND_GAP_MS      = 1000; // hard floor between any two network sends
 
-    let maxY      = Math.max(savedPosition, parseInt(localStorage.getItem(storageKey), 10) || 0, window.scrollY || 0);
+    let maxY      = Math.max(savedPosition, parseInt(storageGet(storageKey), 10) || 0, window.scrollY || 0);
     // syncedY: vị trí đã được server XÁC NHẬN nhận (cache HOẶC DB) — dùng để
     // tránh gửi lặp lại cùng một giá trị chưa đổi.
     // dbSyncedY: vị trí ĐÃ CHẮC CHẮN nằm trong DB (không phải cache-only) —
@@ -154,6 +168,13 @@ document.addEventListener('DOMContentLoaded', function () {
     let runPeakY  = maxY;
     let dir       = null; // 'down' | 'up'
     let lastSent  = Date.now(); // treat page load as t0 so heartbeat doesn't fire on the first tick
+
+    // serverCleared: đã gửi lệnh xóa vị trí lên server và chưa có lần lưu nào
+    // sau đó. Khi người đọc lượn qua lại vùng cuối bài (bình luận, footer...),
+    // mỗi lần dừng cuộn trước đây đều bắn 1 request xóa mới (xóa + 2 query
+    // user_meta phía server) dù chẳng còn gì để xóa — giờ chỉ gửi 1 lần cho
+    // tới khi có tiến độ mới được lưu.
+    let serverCleared = false;
 
     let timeout;
     let lastScrollY      = window.scrollY || window.pageYOffset || 0;
@@ -193,7 +214,8 @@ document.addEventListener('DOMContentLoaded', function () {
     function syncPosition(y, now, isHeartbeat) {
         if (!isLoggedIn) return;
         if (now - lastSent < MIN_SEND_GAP_MS) return;
-        lastSent = now;
+        lastSent      = now;
+        serverCleared = false;
 
         const innerH  = window.innerHeight || lastKnownInnerH;
         const percent = computePercent(y, innerH);
@@ -214,11 +236,23 @@ document.addEventListener('DOMContentLoaded', function () {
         syncedY   = 0;
         dbSyncedY = 0;
         runPeakY  = 0;
-        localStorage.removeItem(storageKey);
+        storageRemove(storageKey);
 
-        if (isLoggedIn) {
-            lastSent = now;
-            sendPayload({ action: 'delete' });
+        if (isLoggedIn && !serverCleared) {
+            lastSent      = now;
+            serverCleared = true;
+
+            fetch(restBase, {
+                method: 'POST',
+                headers: headersJSON,
+                credentials: 'same-origin',
+                body: JSON.stringify({ post_id: postId, device: device, action: 'delete' })
+            })
+                .then(function (r) {
+                    // Không xóa được → cho phép thử lại ở lần chạm cuối bài kế tiếp.
+                    if (!r.ok) serverCleared = false;
+                })
+                .catch(function () { serverCleared = false; });
         }
     }
 
@@ -233,8 +267,9 @@ document.addEventListener('DOMContentLoaded', function () {
         if (maxY <= dbSyncedY) return; // đã chắc chắn nằm trong DB rồi, không có gì để ghi thêm
 
         const now = Date.now();
-        lastSent  = now;
-        syncedY   = maxY;
+        lastSent      = now;
+        serverCleared = false;
+        syncedY       = maxY;
         dbSyncedY = maxY; // fire-and-forget (beacon/keepalive không có response để xác nhận)
 
         const innerH  = window.innerHeight || lastKnownInnerH;
@@ -304,7 +339,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 if (dir === 'down') {
                     runPeakY = Math.max(runPeakY, viewportY);
                     maxY     = runPeakY;
-                    localStorage.setItem(storageKey, String(maxY));
+                    storageSet(storageKey, String(maxY));
 
                     // Still reading forward, but it's been a while since the last
                     // sync — send a heartbeat so a crash/kill can't lose too much.
@@ -328,4 +363,14 @@ document.addEventListener('DOMContentLoaded', function () {
             lastScrollY = viewportY;
         }, delay);
     }, { passive: true });
-});
+}
+
+// Script có thể được nạp SAU khi DOMContentLoaded đã bắn (plugin tối ưu hóa
+// kiểu "delay/defer JS until interaction", nạp động, v.v.) — khi đó listener
+// DOMContentLoaded không bao giờ chạy và plugin im lặng không hoạt động.
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initReadingPosition);
+} else {
+    initReadingPosition();
+}
+})();

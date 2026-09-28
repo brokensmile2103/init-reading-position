@@ -1,7 +1,15 @@
 <?php
-if ( ! defined( 'ABSPATH' ) ) exit;
-
 /**
+ * Optional background cleanup jobs.
+ *
+ * @package InitReadingPosition
+ */
+
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
+/*
  * Cleanup dữ liệu thừa (tùy chọn, MẶC ĐỊNH TẮT HOÀN TOÀN).
  *
  * Hai lượt dọn độc lập, tự bật/tắt riêng qua trang Settings:
@@ -53,16 +61,31 @@ add_action( 'init_plugin_suite_reading_position_cleanup_inactive_event', 'init_p
  * Khởi động lại ngay khi admin vừa bật 1 trong 2 tùy chọn cleanup từ trang
  * Settings — không cần đợi tới cron ngày kế tiếp mới bắt đầu.
  *
- * @param mixed $old_value
- * @param mixed $new_value
+ * @param mixed $old_value Giá trị cũ (unused).
+ * @param mixed $new_value Giá trị mới.
  */
-function init_plugin_suite_reading_position_cleanup_maybe_kickoff_now( $old_value, $new_value ) {
+function init_plugin_suite_reading_position_cleanup_maybe_kickoff_now( $old_value, $new_value ) { // phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter.FoundBeforeLastUsed
 	if ( (bool) $new_value ) {
 		init_plugin_suite_reading_position_cleanup_daily_kickoff();
 	}
 }
 add_action( 'update_option_init_plugin_suite_reading_position_cleanup_stale_enabled', 'init_plugin_suite_reading_position_cleanup_maybe_kickoff_now', 10, 2 );
 add_action( 'update_option_init_plugin_suite_reading_position_cleanup_inactive_enabled', 'init_plugin_suite_reading_position_cleanup_maybe_kickoff_now', 10, 2 );
+
+/**
+ * Cùng mục đích với init_plugin_suite_reading_position_cleanup_maybe_kickoff_now()
+ * nhưng cho lần lưu ĐẦU TIÊN: khi option chưa từng tồn tại, update_option() gọi
+ * add_option() nên chỉ `add_option_{$option}` được kích hoạt (không phải
+ * `update_option_{$option}`) – trước đây lần bật đầu tiên phải đợi cron ngày.
+ *
+ * @param string $option Option name (unused).
+ * @param mixed  $value  Giá trị vừa lưu.
+ */
+function init_plugin_suite_reading_position_cleanup_maybe_kickoff_on_add( $option, $value ) { // phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter.FoundBeforeLastUsed
+	init_plugin_suite_reading_position_cleanup_maybe_kickoff_now( null, $value );
+}
+add_action( 'add_option_init_plugin_suite_reading_position_cleanup_stale_enabled', 'init_plugin_suite_reading_position_cleanup_maybe_kickoff_on_add', 10, 2 );
+add_action( 'add_option_init_plugin_suite_reading_position_cleanup_inactive_enabled', 'init_plugin_suite_reading_position_cleanup_maybe_kickoff_on_add', 10, 2 );
 
 /**
  * Chỉ khởi động 1 lượt quét mới cho từng tính năng nếu: đang bật, không có
@@ -144,27 +167,21 @@ function init_plugin_suite_reading_position_cleanup_stale_tick() {
 		return;
 	}
 
-	$to_delete = [];
+	$to_delete = array();
 	$last_id   = $cursor;
 
 	foreach ( $rows as $row ) {
 		$last_id = (int) $row['id'];
 
 		if ( (int) $row['percent'] < $percent && $row['updated_at'] < $cutoff ) {
-			$to_delete[] = (int) $row['id'];
-			init_plugin_suite_reading_position_invalidate_cache( (int) $row['user_id'], (int) $row['post_id'], $row['device'] );
+			$to_delete[ (int) $row['id'] ] = $row;
 		}
 	}
 
-	if ( ! empty( $to_delete ) ) {
-		$placeholders = implode( ',', array_fill( 0, count( $to_delete ), '%d' ) );
-
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, PluginCheck.Security.DirectDB.UnescapedDBParameter
-		$wpdb->query(
-			// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare
-			$wpdb->prepare( "DELETE FROM {$table} WHERE id IN ($placeholders)", ...$to_delete )
-			// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare
-		);
+	// DELETE trước rồi mới invalidate cache: làm ngược lại, 1 request đọc chen
+	// vào giữa sẽ nạp lại dòng sắp bị xóa vào cache và giữ nó tới hết TTL.
+	if ( ! empty( $to_delete ) && init_plugin_suite_reading_position_delete_ids( array_keys( $to_delete ) ) ) {
+		init_plugin_suite_reading_position_invalidate_cache_many( $to_delete );
 	}
 
 	update_option( 'irp_cleanup_stale_cursor', $last_id, false );
@@ -192,7 +209,8 @@ function init_plugin_suite_reading_position_cleanup_inactive_tick() {
 	if ( get_transient( 'irp_cleanup_inactive_lock' ) ) {
 		return;
 	}
-	set_transient( 'irp_cleanup_inactive_lock', 1, 60 );
+	// Lock dài hơn lượt "stale" vì 1 tick có thể phải xóa nhiều batch cho user nặng.
+	set_transient( 'irp_cleanup_inactive_lock', 1, 5 * MINUTE_IN_SECONDS );
 
 	if ( ! (bool) get_option( 'init_plugin_suite_reading_position_cleanup_inactive_enabled', 0 ) ) {
 		delete_transient( 'irp_cleanup_inactive_lock' );
@@ -238,37 +256,18 @@ function init_plugin_suite_reading_position_cleanup_inactive_tick() {
 		// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare
 	);
 
-	$stale_users = [];
+	$stale_users = array();
 	foreach ( $activity as $row ) {
 		if ( $row['last_activity'] < $cutoff ) {
 			$stale_users[] = (int) $row['user_id'];
 		}
 	}
 
-	if ( ! empty( $stale_users ) ) {
-		$del_placeholders = implode( ',', array_fill( 0, count( $stale_users ), '%d' ) );
-
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, PluginCheck.Security.DirectDB.UnescapedDBParameter
-		$affected = $wpdb->get_results(
-			// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare
-			$wpdb->prepare(
-				"SELECT user_id, post_id, device FROM {$table} WHERE user_id IN ($del_placeholders)",
-				...$stale_users
-			),
-			ARRAY_A
-			// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare
-		);
-
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, PluginCheck.Security.DirectDB.UnescapedDBParameter
-		$wpdb->query(
-			// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare
-			$wpdb->prepare( "DELETE FROM {$table} WHERE user_id IN ($del_placeholders)", ...$stale_users )
-			// phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare
-		);
-
-		foreach ( $affected as $row ) {
-			init_plugin_suite_reading_position_invalidate_cache( (int) $row['user_id'], (int) $row['post_id'], $row['device'] );
-		}
+	// Xóa theo từng user, mỗi user chia batch nhỏ (xem
+	// init_plugin_suite_reading_position_delete_where()) – user có rất nhiều dòng
+	// không còn bị nạp toàn bộ vào bộ nhớ hay xóa bằng 1 câu DELETE khổng lồ.
+	foreach ( $stale_users as $stale_user_id ) {
+		init_plugin_suite_reading_position_delete_by_user( $stale_user_id );
 	}
 
 	update_option( 'irp_cleanup_inactive_cursor', max( $user_ids ), false );

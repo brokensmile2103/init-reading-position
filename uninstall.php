@@ -1,25 +1,17 @@
 <?php
 /**
- * Uninstall cleanup for Init Reading Position
+ * Uninstall cleanup for Init Reading Position.
  *
  * Removes all plugin options, transients, and scheduled cron events.
  * The custom database table (wp_init_rp_positions) and user reading data
  * are intentionally preserved — uninstalling a plugin should not silently
  * destroy user content that may be re-used if the plugin is reinstalled.
+ *
+ * @package InitReadingPosition
  */
+
 if ( ! defined( 'WP_UNINSTALL_PLUGIN' ) ) {
 	exit;
-}
-
-if ( is_multisite() ) {
-	$sites = get_sites( [ 'number' => 0 ] );
-	foreach ( $sites as $site ) {
-		switch_to_blog( $site->blog_id );
-		init_plugin_suite_reading_position_uninstall_site();
-		restore_current_blog();
-	}
-} else {
-	init_plugin_suite_reading_position_uninstall_site();
 }
 
 /**
@@ -40,6 +32,7 @@ function init_plugin_suite_reading_position_uninstall_site() {
 	// === Internal state options ===
 	delete_option( 'irp_plugin_db_version' );
 	delete_option( 'irp_migration_done' );
+	delete_option( 'irp_index_migration_done' );
 	delete_option( 'irp_cleanup_stale_cursor' );
 	delete_option( 'irp_cleanup_stale_last_run' );
 	delete_option( 'irp_cleanup_inactive_cursor' );
@@ -55,4 +48,15 @@ function init_plugin_suite_reading_position_uninstall_site() {
 	wp_clear_scheduled_hook( 'init_plugin_suite_reading_position_cleanup_daily_event' );
 	wp_clear_scheduled_hook( 'init_plugin_suite_reading_position_cleanup_stale_event' );
 	wp_clear_scheduled_hook( 'init_plugin_suite_reading_position_cleanup_inactive_event' );
+}
+
+if ( is_multisite() ) {
+	$init_plugin_suite_rp_sites = get_sites( array( 'number' => 0 ) );
+	foreach ( $init_plugin_suite_rp_sites as $init_plugin_suite_rp_site ) {
+		switch_to_blog( $init_plugin_suite_rp_site->blog_id );
+		init_plugin_suite_reading_position_uninstall_site();
+		restore_current_blog();
+	}
+} else {
+	init_plugin_suite_reading_position_uninstall_site();
 }
